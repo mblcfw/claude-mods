@@ -53,6 +53,18 @@
   .search-wrap { position: relative; }
   .search-wrap svg { position: absolute; left: 8px; top: 8px; opacity: .55; }
   #stats { color: var(--muted); font-size: 12px; padding: 0 2px; }
+  #sessions { display: flex; flex-direction: column; gap: 1px; max-height: 170px; overflow-y: auto; }
+  #sessions:empty { display: none; }
+  .ss { display: flex; align-items: center; gap: 7px; font-size: 12px; color: #c9ced8; padding: 3px 4px; border-radius: 5px;
+    cursor: pointer; user-select: none; }
+  .ss:hover { background: rgba(255,255,255,.05); }
+  .ss i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .ss span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .ss em { font-style: normal; color: var(--faint); font-size: 11px; flex: none; }
+  .ss.off { opacity: .4; }
+  .ss.off span { text-decoration: line-through; }
+  #empty { left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 14px 18px; color: var(--muted); text-align: center;
+    display: none; max-width: 340px; }
 
   #settings { top: 12px; right: 12px; width: 250px; }
   #settings summary { list-style: none; cursor: pointer; padding: 9px 12px; font-weight: 600; display: flex;
@@ -130,7 +142,9 @@
     <input id="search" placeholder="Rechercher des nœuds…" autocomplete="off" spellcheck="false">
   </div>
   <div id="stats">Connexion…</div>
+  <div id="sessions" title="Clique sur une session pour la masquer ou l'afficher"></div>
 </div>
+<div id="empty" class="panel">En attente des sessions Claude…<br>Les sessions qui ont le mod agent-viewer apparaîtront ici.</div>
 
 <details id="settings" class="panel">
   <summary>Réglages</summary>
@@ -197,6 +211,7 @@ function fmtDur(ms) {
   return m < 60 ? `${m}m${String(s % 60).padStart(2, '0')}` : `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}`
 }
 function agentColor(a) {
+  if (a.isMain && !a.isLive) return '#3a404d'
   if (a.state === 'failed') return FAILED
   if (a.state !== 'running') return IDLE
   if (a.currentToolName) return CATS[categorize(a.currentToolName)].color
@@ -212,6 +227,64 @@ const hiddenCats = new Set(cfg.hiddenCats)
 
 // ---------- Données ----------
 let raw = { agents: [], actions: [], now: Date.now() }
+let sessionsRaw = []
+let lastPayload = { sessions: [], now: Date.now() }
+const hiddenSessions = new Set(cfg.hiddenSessions || [])
+const folderName = p => (p || '').split(/[\\/]/).filter(Boolean).pop() || p || ''
+
+// Toutes les sessions mises à plat : chaque id est préfixé par sa session, pour ne jamais les mélanger.
+// L'agent principal de chaque session porte le nom de la session.
+function flatten(payload) {
+  const list = Array.isArray(payload.sessions)
+    ? payload.sessions
+    : [{ id: 'local', title: '', cwd: '', agents: payload.agents || [], actions: payload.actions || [], isLive: true }]
+  sessionsRaw = list
+  const agents = [], actions = []
+  for (const s of list) {
+    if (hiddenSessions.has(s.id)) continue
+    const key = id => s.id + ':' + id
+    const title = s.title || folderName(s.cwd) || 'Session ' + s.id.slice(0, 6)
+    const info = { sessionId: s.id, isLive: !!s.isLive, sessionTitle: title, sessionCwd: s.cwd || '' }
+    let hasMain = false
+    for (const a of s.agents) {
+      const isMain = a.id === MAIN
+      if (isMain) hasMain = true
+      agents.push({
+        ...a, ...info, isMain,
+        id: key(a.id),
+        parentId: isMain ? undefined : key(a.parentId || MAIN),
+        description: isMain ? title : a.description,
+        type: isMain ? 'session · ' + (folderName(s.cwd) || '?') : a.type,
+      })
+    }
+    if (!hasMain) {
+      agents.unshift({ ...info, isMain: true, id: key(MAIN), type: 'session · ' + (folderName(s.cwd) || '?'), description: title,
+        state: s.isLive ? 'done' : 'stopped', startedAt: payload.now || Date.now(), toolCount: 0, recentTools: [] })
+    }
+    for (const x of s.actions) actions.push({ ...x, id: key(x.id), agentId: key(x.agentId), sessionId: s.id })
+  }
+  return { agents, actions, now: payload.now || Date.now() }
+}
+
+const sessionsEl = document.getElementById('sessions')
+function renderSessions() {
+  sessionsEl.replaceChildren(...sessionsRaw.map(s => {
+    const subs = s.agents.filter(a => a.id !== MAIN)
+    const running = subs.filter(a => a.state === 'running').length
+    const title = s.title || folderName(s.cwd) || 'Session ' + s.id.slice(0, 6)
+    return h('div', {
+      class: 'ss' + (hiddenSessions.has(s.id) ? ' off' : ''),
+      title: (s.cwd || '') + (s.isLive ? '' : ' — inactive'),
+      onclick: () => {
+        hiddenSessions.has(s.id) ? hiddenSessions.delete(s.id) : hiddenSessions.add(s.id)
+        cfg.hiddenSessions = [...hiddenSessions]; saveCfg()
+        raw = flatten(lastPayload); rebuild(); renderSessions()
+      },
+    }, dot(s.isLive ? '#3DDC84' : '#5B6475'), h('span', {}, title),
+      h('em', {}, running ? `${running} actif${running > 1 ? 's' : ''}` : `${subs.length} ag.`))
+  }))
+  document.getElementById('empty').style.display = sessionsRaw.length ? 'none' : 'block'
+}
 let receivedAt = Date.now()
 const nowEst = () => raw.now + (Date.now() - receivedAt)
 
@@ -222,10 +295,9 @@ let neighbors = new Map()
 let alpha = 1, alphaTarget = 0
 
 function rebuild() {
-  const agents = raw.agents.filter(a => !cfg.hideDone || a.state === 'running' || a.id === MAIN)
-  if (!agents.some(a => a.id === MAIN)) agents.unshift({ id: MAIN, type: 'principal', description: 'Agent principal', state: 'done', startedAt: raw.now, toolCount: 0, recentTools: [] })
+  const agents = raw.agents.filter(a => !cfg.hideDone || a.state === 'running' || a.isMain)
   const agentIds = new Set(agents.map(a => a.id))
-  const parentOf = a => a.id === MAIN ? null : (a.parentId && agentIds.has(a.parentId) ? a.parentId : MAIN)
+  const parentOf = a => a.isMain ? null : (a.parentId && agentIds.has(a.parentId) ? a.parentId : a.sessionId + ':' + MAIN)
 
   const wanted = new Map()
   const newLinks = []
@@ -258,13 +330,14 @@ function rebuild() {
       const link = newLinks.find(l => l.s === id)
       const anchor = link && nodes.get(link.t)
       const ang = Math.random() * Math.PI * 2
-      const d = anchor ? 25 + Math.random() * 25 : Math.random() * 60
+      const isRoot = w.kind === 'agent' && w.ref.isMain
+      const d = anchor ? 25 + Math.random() * 25 : isRoot ? 220 + Math.random() * 120 : Math.random() * 60
       n = { id, x: (anchor ? anchor.x : 0) + Math.cos(ang) * d, y: (anchor ? anchor.y : 0) + Math.sin(ang) * d, vx: 0, vy: 0, fx: null, fy: null }
       nodes.set(id, n); added++
     }
     Object.assign(n, w)
     const deg = degree.get(id) || 0
-    n.baseR = w.kind === 'agent' ? Math.min(24, (id === 'ag:' + MAIN ? 11 : 8) + Math.sqrt(deg) * 1.6) : 3.6
+    n.baseR = w.kind === 'agent' ? Math.min(24, (w.ref.isMain ? 12 : 8) + Math.sqrt(deg) * 1.6) : 3.6
   }
   links = newLinks.filter(l => nodes.has(l.s) && nodes.has(l.t))
   neighbors = new Map()
@@ -293,11 +366,18 @@ function tick() {
       let dx = b.x - a.x, dy = b.y - a.y
       let d2 = dx * dx + dy * dy
       if (d2 < 0.01) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d2 = 0.25 }
-      if (d2 > 250000) continue
+      if (d2 > 250000 && !(a.ref && b.ref && a.ref.isMain && b.ref.isMain)) continue
       const ma = a.kind === 'agent' ? 3 : 1, mb = b.kind === 'agent' ? 3 : 1
       const f = repel * alpha / d2
       a.vx -= dx * f * mb / ma; a.vy -= dy * f * mb / ma
       b.vx += dx * f * ma / mb; b.vy += dy * f * ma / mb
+      if (a.ref && b.ref && a.ref.isMain && b.ref.isMain) {
+        const d = Math.sqrt(d2), gap = cfg.dist * 5
+        if (d < gap) {
+          const k = (gap - d) / d * 0.05 * alpha
+          a.vx -= dx * k; a.vy -= dy * k; b.vx += dx * k; b.vy += dy * k
+        }
+      }
     }
   }
   for (const l of links) {
@@ -518,7 +598,9 @@ function fillBubble(id) {
     el.append(
       h('header', {}, h('i'), h('b', { title: a.description }, a.description || a.type), close),
       h('div', { class: 'body' },
-        h('div', { class: 'meta' }, [a.type, a.model, a.isBackground ? 'arrière-plan' : null].filter(Boolean).join(' · ')),
+        a.isMain
+          ? h('div', { class: 'meta' }, (a.isLive ? 'Session active' : 'Session inactive') + (a.sessionCwd ? ' · ' + a.sessionCwd : ''))
+          : h('div', { class: 'meta' }, [a.type, a.model, a.isBackground ? 'arrière-plan' : null].filter(Boolean).join(' · ')),
         h('div', {}, h('span', { class: 'chip' }, dot(n.color), STATE_LABEL[a.state] || a.state), '  ',
           fmtDur((a.endedAt ?? now) - a.startedAt), ' · ', a.toolCount, a.toolCount > 1 ? ' outils' : ' outil'),
         h('div', {}, 'Action : ', a.state === 'running' ? h('span', { class: 'chip' }, dot(curColor), clip(current, 60)) : '—'),
@@ -578,10 +660,11 @@ function matches(n) {
 }
 
 function updateStats() {
-  const subs = raw.agents.filter(a => a.id !== MAIN)
+  const subs = raw.agents.filter(a => !a.isMain)
   const running = subs.filter(a => a.state === 'running').length
+  const n = sessionsRaw.length
   document.getElementById('stats').textContent =
-    `${running} actif${running > 1 ? 's' : ''} · ${subs.length} sous-agent${subs.length > 1 ? 's' : ''} · ${raw.actions.length} action${raw.actions.length > 1 ? 's' : ''}`
+    `${n} session${n > 1 ? 's' : ''} · ${running} actif${running > 1 ? 's' : ''} · ${subs.length} sous-agent${subs.length > 1 ? 's' : ''} · ${raw.actions.length} action${raw.actions.length > 1 ? 's' : ''}`
 }
 
 // ---------- Dessin ----------
@@ -877,8 +960,31 @@ function ensure3D() {
   return loading3D
 }
 
+// Force 3D qui écarte les racines de session les unes des autres
+function sessionSeparation() {
+  let all = []
+  const force = alpha => {
+    const roots = all.filter(o => o.kind === 'agent' && o.ref && o.ref.isMain)
+    const gap = cfg.dist * 5
+    for (let i = 0; i < roots.length; i++) {
+      for (let j = i + 1; j < roots.length; j++) {
+        const a = roots[i], b = roots[j]
+        const dx = b.x - a.x, dy = b.y - a.y, dz = (b.z || 0) - (a.z || 0)
+        const d = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1
+        if (d >= gap) continue
+        const k = (gap - d) / d * 0.08 * alpha
+        a.vx -= dx * k; a.vy -= dy * k; a.vz -= dz * k
+        b.vx += dx * k; b.vy += dy * k; b.vz += dz * k
+      }
+    }
+  }
+  force.initialize = nodesIn => { all = nodesIn }
+  return force
+}
+
 function apply3DForces() {
   if (!G) return
+  if (!G.d3Force('sessions')) G.d3Force('sessions', sessionSeparation())
   G.d3Force('charge').strength(-cfg.repel * 7)
   // Sous-agents loin de leur parent, actions en grappe serrée autour de leur agent
   G.d3Force('link')
@@ -929,7 +1035,7 @@ function sync3D() {
     o.color = n.color
     o.label = n.label
     const degree = neighbors.get(n.id)?.size || 0
-    o.val = n.kind === 'agent' ? (n.id === 'ag:' + MAIN ? 14 : 6) + Math.min(20, degree * 0.5) : 1
+    o.val = n.kind === 'agent' ? (n.ref.isMain ? 16 : 6) + Math.min(20, degree * 0.5) : 1
   }
   for (const id of [...n3.keys()]) if (!nodes.has(id)) n3.delete(id)
   const sig = [...n3.keys()].join('|') + '#' + links.length
@@ -1028,7 +1134,9 @@ function connect() {
   const es = new EventSource('/events')
   es.onopen = () => { connected = true; statusEl.classList.add('ok'); statusText.textContent = 'En direct' }
   es.onmessage = ev => {
-    try { raw = JSON.parse(ev.data) } catch { return }
+    try { lastPayload = JSON.parse(ev.data) } catch { return }
+    raw = flatten(lastPayload)
+    renderSessions()
     receivedAt = Date.now()
     rebuild()
     if (first && nodes.size) {

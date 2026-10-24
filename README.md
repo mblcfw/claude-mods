@@ -4,7 +4,7 @@ Des mods pour Claude Code qui améliorent l'interface.
 
 | Mod | Ce qu'il fait |
 | --- | --- |
-| [agent-viewer](agent-viewer/) | Montre en direct quel agent fait quelle tâche : un panneau « Agents » à côté du chat, et une vue interactive façon Obsidian (2D ou 3D) avec zoom, déplacement, bulles de détail et couleurs par type d'action. |
+| [agent-viewer](agent-viewer/) | Montre en direct quel agent fait quelle tâche : un panneau « Agents » à côté du chat, et une vue interactive façon Obsidian (2D ou 3D) qui regroupe toutes tes sessions, avec zoom, déplacement, bulles de détail et couleurs par type d'action. |
 | [turn-stats](turn-stats/) | Un bandeau au-dessus du prompt avec la durée, les outils et les tokens du dernier tour (et de ses sous-agents). |
 
 ## Installation

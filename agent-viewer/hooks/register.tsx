@@ -17,12 +17,16 @@ const frozen = atom({ plugin: 'agent-viewer', key: 'frozen' } as const, null)
 const zoom = atom({ plugin: 'agent-viewer', key: 'zoom' } as const, 1)
 const liveUrl = atom({ plugin: 'agent-viewer', key: 'liveUrl' } as const, null)
 const liveError = atom({ plugin: 'agent-viewer', key: 'liveError' } as const, null)
+const sessionTitle = atom({ plugin: 'agent-viewer', key: 'sessionTitle' } as const, null)
 
-// Vue interactive : un petit serveur local (server/server.mjs) reçoit l'état et le pousse à la page web
-let server: { port: number; token: string } | null = null
+// Vue interactive : un hub local (server/server.mjs), partagé par toutes les sessions qui ont le mod,
+// reçoit l'état de chaque session et le pousse à la page web
+let hub: { port: number } | null = null
 let isDirty = true
 let isPushing = false
+let isEnsuring = false
 let lastPushAt = 0
+let lastEnsureAt = 0
 
 // Taille d'une cellule de police du panneau desktop, en pixels (estimation)
 const CELL_W = 7.6
@@ -86,60 +90,56 @@ async function patch($: Engine, id: string, fn: (row: AgentRow) => AgentRow) {
   isDirty = true
 }
 
-// Lance le serveur local et lit son adresse ; la boucle dure autant que le serveur
-async function startServer($: Engine) {
-  if (server) return
-  await update($, liveError, () => null)
-  let buffer = ''
-  let errors = ''
+// Trouve le hub qui tourne déjà (lancé par une autre session) ou en démarre un, puis note son adresse
+async function ensureHub($: Engine) {
+  if (hub || isEnsuring) return
+  isEnsuring = true
+  lastEnsureAt = await $.clock.now()
   try {
-    const child = $.process.spawn({ argv: ['node', `${$.plugin.root}/server/server.mjs`] })
-    for await (const chunk of child) {
-      if (chunk.stream === 'stderr') {
-        errors = (errors + chunk.text).slice(-400)
-        continue
-      }
-      buffer += chunk.text
-      let end = buffer.indexOf('\n')
-      while (end >= 0) {
-        const line = buffer.slice(0, end).trim()
-        buffer = buffer.slice(end + 1)
-        const ready = /^READY (\d+) ([0-9a-f]{32})$/.exec(line)
-        if (ready) {
-          server = { port: Number(ready[1]), token: ready[2] ?? '' }
-          isDirty = true
-          await update($, liveUrl, () => `http://127.0.0.1:${ready[1]}/`)
-        }
-        end = buffer.indexOf('\n')
-      }
+    const ran = await $.process.run(['node', `${$.plugin.root}/server/server.mjs`, '--ensure'], { timeoutMs: 15_000 })
+    const found = /HUB (\d+)/.exec(ran.stdout)
+    if (ran.exitCode === 0 && found) {
+      hub = { port: Number(found[1]) }
+      isDirty = true
+      await update($, liveError, () => null)
+      await update($, liveUrl, () => `http://127.0.0.1:${found[1]}/`)
+    } else {
+      await update($, liveError, () => clip((ran.stderr || ran.stdout || `code ${ran.exitCode}`).trim(), 300))
     }
-    if (errors) await update($, liveError, () => errors.trim())
   } catch (err) {
     await update($, liveError, () => `Impossible de lancer « node » : ${String(err)}`)
+  } finally {
+    isEnsuring = false
   }
-  server = null
-  await update($, liveUrl, () => null)
 }
 
-// Envoie l'état au serveur local quand il a changé (au plus ~4 fois par seconde), ou un signe de vie
+// Envoie l'état de cette session au hub quand il a changé (au plus ~4 fois par seconde), et un signe de vie
+// toutes les 20 s. Si le hub a disparu (la page et les autres sessions continuent), on en relance un.
 async function push($: Engine) {
-  if (!server || isPushing) return
+  if (isPushing) return
   const now = await $.clock.now()
-  const isHeartbeat = now - lastPushAt > 60_000
+  if (!hub) {
+    if (now - lastEnsureAt > 5_000) void ensureHub($)
+    return
+  }
+  const isHeartbeat = now - lastPushAt > 20_000
   if (!isDirty && !isHeartbeat) return
   isPushing = true
   isDirty = false
   lastPushAt = now
   try {
-    const body = JSON.stringify({ agents: await read($, agents), actions: await read($, actions), now })
-    const res = await $.http.fetch(`http://127.0.0.1:${server.port}/state`, {
+    const session = { id: await $.session.id(), cwd: await $.session.cwd(), title: (await read($, sessionTitle)) ?? '' }
+    const body = JSON.stringify({ session, agents: await read($, agents), actions: await read($, actions), now })
+    const res = await $.http.fetch(`http://127.0.0.1:${hub.port}/state`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-token': server.token },
+      headers: { 'content-type': 'application/json', 'x-agent-viewer': '1' },
       body,
     })
-    if (!res.ok) isDirty = true
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
   } catch {
+    hub = null
     isDirty = true
+    await update($, liveUrl, () => null)
   } finally {
     isPushing = false
   }
@@ -169,8 +169,8 @@ export const register: Register = on => {
     })
     void $.ui.open({ id: PANE, title: TITLE })
 
-    // Vue interactive : serveur local + envoi de l'état à chaque changement
-    void startServer($)
+    // Vue interactive : hub partagé + envoi de l'état de cette session à chaque changement
+    void ensureHub($)
     $.clock.every(250, () => void push($))
 
     return next(e)
@@ -185,18 +185,40 @@ export const register: Register = on => {
   on('command.run', { command: 'graphe-agents' }, async $ => {
     const url = await read($, liveUrl)
     if (!url) {
-      void startServer($)
+      void ensureHub($)
       const error = await read($, liveError)
 
       return { text: error ? `La vue interactive n'a pas pu démarrer : ${error}` : 'La vue interactive démarre, relance la commande dans un instant.' }
     }
 
-    return { text: `Vue interactive des agents : ${url}\nOuvre-la dans le navigateur à côté du chat (ou dans ton navigateur).` }
+    return { text: `Vue interactive des agents (toutes les sessions) : ${url}\nOuvre-la dans le navigateur à côté du chat (ou dans ton navigateur).` }
+  })
+
+  // La session se termine : le hub la marque comme terminée tout de suite
+  on('session.end', async ($, e, next) => {
+    if (hub) {
+      try {
+        await $.http.fetch(`http://127.0.0.1:${hub.port}/end`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-agent-viewer': '1' },
+          body: JSON.stringify({ id: e.sessionId }),
+        })
+      } catch {
+        // le hub n'est plus là : rien à signaler
+      }
+    }
+
+    return next(e)
   })
 
   // L'agent principal démarre un tour à chaque message envoyé
   on('prompt.submit', async ($, e, next) => {
     const now = await $.clock.now()
+    // Le premier message sert de nom à la session dans la vue de toutes les sessions
+    const text = e.text.replace(/\s+/g, ' ').trim()
+    if (text && !text.startsWith('/') && !(await read($, sessionTitle))) {
+      await update($, sessionTitle, () => clip(text, 70))
+    }
     await patch($, MAIN, row => ({ ...row, state: 'running', startedAt: now, endedAt: undefined }))
 
     return next(e)
@@ -306,14 +328,14 @@ export const register: Register = on => {
     const liveRow = url ? (
       <Box flexDirection="row" gap={1} flexWrap="wrap">
         <Text color="success">●</Text>
-        <Text dimColor>Vue interactive (zoom, déplacement, bulles) :</Text>
+        <Text dimColor>Vue interactive, toutes les sessions :</Text>
         <Text weight="semibold">{url}</Text>
       </Box>
     ) : (
       <Box flexDirection="row" gap={1} flexWrap="wrap" alignItems="center">
         <Text color={urlError ? 'error' : 'warning'}>●</Text>
         <Text dimColor>{urlError ? `Vue interactive arrêtée : ${clip(urlError, 120)}` : 'Vue interactive : démarrage…'}</Text>
-        {urlError && <Button key="restart" label="Relancer" onPress={() => startServer($)} />}
+        {urlError && <Button key="restart" label="Relancer" onPress={() => ensureHub($)} />}
       </Box>
     )
 

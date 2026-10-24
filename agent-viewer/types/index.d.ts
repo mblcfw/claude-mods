@@ -51,6 +51,8 @@ declare module 'claude-code' {
       liveUrl: string | null
       /** Pourquoi le serveur local n'a pas pu démarrer, le cas échéant */
       liveError: string | null
+      /** Nom de la session dans la vue de toutes les sessions : son premier message */
+      sessionTitle: string | null
     }
   }
 }
