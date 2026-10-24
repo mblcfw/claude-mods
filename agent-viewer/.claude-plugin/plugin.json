@@ -1,0 +1,6 @@
+{
+  "name": "agent-viewer",
+  "version": "0.1.0",
+  "description": "Voir en direct quel agent fait quelle tâche : panneau, et vue interactive 2D / 3D façon Obsidian.",
+  "types": "./types/index.d.ts"
+}

@@ -1,0 +1,17 @@
+{
+  "name": "claude-mods",
+  "owner": { "name": "mblcfw" },
+  "description": "Des mods pour Claude Code qui améliorent l'interface : visualisation des agents, stats des tours.",
+  "plugins": [
+    {
+      "name": "agent-viewer",
+      "source": "./agent-viewer",
+      "description": "Voir en direct quel agent fait quelle tâche : panneau, et vue interactive 2D / 3D façon Obsidian."
+    },
+    {
+      "name": "turn-stats",
+      "source": "./turn-stats",
+      "description": "Bandeau au-dessus du prompt : durée, outils et tokens du dernier tour."
+    }
+  ]
+}

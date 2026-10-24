@@ -1,0 +1,6 @@
+{
+  "name": "turn-stats",
+  "version": "0.1.0",
+  "description": "Bandeau au-dessus du prompt : durée, outils et tokens du dernier tour (et de ses sous-agents).",
+  "types": "./types/index.d.ts"
+}

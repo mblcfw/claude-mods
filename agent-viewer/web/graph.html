@@ -1,0 +1,1047 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Graphe des agents</title>
+<!-- Bibliothèques 3D : versions figées, vérifiées par empreinte, chargées seulement en mode 3D -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three-spritetext": "https://cdn.jsdelivr.net/npm/three-spritetext@1.9.0/dist/three-spritetext.mjs"
+  },
+  "integrity": {
+    "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js": "sha384-GY5FqjttLCFRt/McQbyaVdCk2O1IQtOeX8Py6NfD89BIAsIyJFRl4UgSXrk2vXAk",
+    "https://cdn.jsdelivr.net/npm/three-spritetext@1.9.0/dist/three-spritetext.mjs": "sha384-PfD+NOEYTHyMAXhy8KErJAKKKfGQvzqold9pcLUfEUAOwvIwb1WnA0CB5TWOt7OP"
+  }
+}
+</script>
+<style>
+  :root {
+    --bg: #0b0d12;
+    --panel: rgba(21, 25, 35, 0.92);
+    --border: #262c3a;
+    --text: #e6e8ee;
+    --muted: #8b93a3;
+    --faint: #5b6475;
+    --accent: #a970ff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
+    font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  #c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+  #c.panning { cursor: grabbing; }
+  #c.on-node { cursor: pointer; }
+  #c.dragging { cursor: grabbing; }
+  #g3d { position: fixed; inset: 0; display: none; }
+  #ov { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; display: none; z-index: 5; }
+  .seg { display: flex; background: #0f1218; border: 1px solid var(--border); border-radius: 7px; padding: 2px; gap: 2px; }
+  .seg button { flex: 1; background: none; border: none; color: var(--muted); font: inherit; font-weight: 600; padding: 4px 0;
+    border-radius: 5px; cursor: pointer; }
+  .seg button.on { background: #2a3142; color: var(--text); }
+  .seg button:hover:not(.on) { color: var(--text); }
+  .float-tooltip-kap, .scene-tooltip { font: 12px/1.4 system-ui, sans-serif !important; background: rgba(21,25,35,.94) !important;
+    border: 1px solid #262c3a; border-radius: 7px !important; padding: 5px 9px !important; color: #e6e8ee !important; }
+
+  .panel { position: fixed; background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    backdrop-filter: blur(6px); box-shadow: 0 8px 24px rgba(0,0,0,.35); }
+  #top { top: 12px; left: 12px; padding: 8px; display: flex; flex-direction: column; gap: 6px; width: 250px; }
+  #search { width: 100%; background: #0f1218; border: 1px solid var(--border); color: var(--text); border-radius: 7px;
+    padding: 6px 9px 6px 28px; font: inherit; outline: none; }
+  #search:focus { border-color: var(--accent); }
+  .search-wrap { position: relative; }
+  .search-wrap svg { position: absolute; left: 8px; top: 8px; opacity: .55; }
+  #stats { color: var(--muted); font-size: 12px; padding: 0 2px; }
+
+  #settings { top: 12px; right: 12px; width: 250px; }
+  #settings summary { list-style: none; cursor: pointer; padding: 9px 12px; font-weight: 600; display: flex;
+    justify-content: space-between; align-items: center; user-select: none; }
+  #settings summary::-webkit-details-marker { display: none; }
+  #settings summary::after { content: "▸"; color: var(--muted); transition: transform .15s; }
+  #settings[open] summary::after { transform: rotate(90deg); }
+  .settings-body { padding: 4px 12px 12px; display: flex; flex-direction: column; gap: 10px; }
+  .group-title { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; margin-top: 4px; }
+  label.slider { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: #c9ced8; }
+  label.slider span { display: flex; justify-content: space-between; }
+  label.slider output { color: var(--muted); font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  label.toggle { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #c9ced8; cursor: pointer; }
+  label.toggle input { accent-color: var(--accent); }
+  .btn { background: #1d2230; color: var(--text); border: 1px solid var(--border); border-radius: 7px; padding: 6px 10px;
+    font: inherit; cursor: pointer; }
+  .btn:hover { border-color: var(--accent); }
+  .row { display: flex; gap: 6px; }
+  .row .btn { flex: 1; }
+
+  #legend { left: 12px; bottom: 12px; padding: 8px 10px; display: flex; flex-wrap: wrap; gap: 4px 12px; max-width: min(560px, calc(100vw - 24px)); }
+  .lg { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #aeb4c0; cursor: pointer; user-select: none;
+    padding: 2px 4px; border-radius: 5px; }
+  .lg:hover { background: rgba(255,255,255,.05); }
+  .lg.off { opacity: .35; text-decoration: line-through; }
+  .lg i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .lg.static { cursor: default; }
+  .lg.static:hover { background: none; }
+
+  #status { right: 12px; bottom: 12px; padding: 6px 10px; font-size: 11.5px; color: var(--muted); display: flex; align-items: center; gap: 7px; }
+  #status i { width: 8px; height: 8px; border-radius: 50%; background: #ff4d4f; display: inline-block; }
+  #status.ok i { background: #3ddc84; }
+  #help { color: var(--faint); }
+
+  /* Bulles d'information : on les déplace en cliquant-glissant dessus */
+  #bubbles { position: fixed; inset: 0; pointer-events: none; z-index: 20; }
+  .panel { z-index: 10; }
+  .bubble { position: absolute; width: 320px; max-width: calc(100vw - 24px); background: #151923; border: 1.5px solid var(--c, #888);
+    border-radius: 11px; box-shadow: 0 10px 30px rgba(0,0,0,.55); pointer-events: auto; cursor: grab; user-select: none;
+    touch-action: none; }
+  .bubble.grabbing { cursor: grabbing; box-shadow: 0 16px 40px rgba(0,0,0,.7); }
+  .bubble header { display: flex; align-items: center; gap: 8px; padding: 9px 10px 6px 12px; }
+  .bubble header i { width: 10px; height: 10px; border-radius: 50%; background: var(--c); flex: none; box-shadow: 0 0 8px var(--c); }
+  .bubble header b { flex: 1; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bubble header button { background: none; border: none; color: var(--muted); font-size: 16px; cursor: pointer; padding: 0 4px; line-height: 1; }
+  .bubble header button:hover { color: var(--text); }
+  .bubble .body { padding: 0 12px 11px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #c9ced8;
+    max-height: calc(100vh - 70px); overflow-y: auto; }
+  .bubble .meta { color: var(--muted); }
+  .bubble .chip { display: inline-flex; align-items: center; gap: 5px; padding: 1px 7px; border-radius: 999px;
+    background: rgba(255,255,255,.06); font-size: 11.5px; }
+  .bubble .chip i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+  .bubble pre { margin: 2px 0; padding: 6px 8px; background: #0f1218; border-radius: 6px; max-height: 140px; overflow: auto;
+    white-space: pre-wrap; word-break: break-all; font: 11.5px/1.4 ui-monospace, "Cascadia Code", Consolas, monospace;
+    color: #dfe3ea; user-select: text; cursor: text; }
+  .bubble ul { list-style: none; margin: 2px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+  .bubble li { display: flex; gap: 6px; align-items: baseline; }
+  .bubble li i { width: 7px; height: 7px; border-radius: 50%; flex: none; transform: translateY(-1px); }
+  .bubble li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .bubble li em { font-style: normal; color: var(--faint); flex: none; }
+  .bubble .gone { color: #ff9f43; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="g3d"></div>
+<canvas id="ov"></canvas>
+<div id="bubbles"></div>
+
+<div id="top" class="panel">
+  <div class="seg" title="Vue en 2D ou en 3D"><button id="m2d" class="on">2D</button><button id="m3d">3D</button></div>
+  <div class="search-wrap">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <input id="search" placeholder="Rechercher des nœuds…" autocomplete="off" spellcheck="false">
+  </div>
+  <div id="stats">Connexion…</div>
+</div>
+
+<details id="settings" class="panel">
+  <summary>Réglages</summary>
+  <div class="settings-body">
+    <div class="group-title">Filtres</div>
+    <label class="toggle">Afficher les actions <input type="checkbox" id="showActions" checked></label>
+    <label class="toggle">Masquer les agents terminés <input type="checkbox" id="hideDone"></label>
+    <label class="toggle">Toujours afficher les libellés <input type="checkbox" id="allLabels"></label>
+    <div class="group-title">Forces</div>
+    <label class="slider"><span>Force centrale <output id="o-center"></output></span><input type="range" id="center" min="0" max="1" step="0.01"></label>
+    <label class="slider"><span>Force de répulsion <output id="o-repel"></output></span><input type="range" id="repel" min="0" max="20" step="0.1"></label>
+    <label class="slider"><span>Force des liens <output id="o-link"></output></span><input type="range" id="link" min="0" max="1" step="0.01"></label>
+    <label class="slider"><span>Distance des liens <output id="o-dist"></output></span><input type="range" id="dist" min="20" max="400" step="1"></label>
+    <div class="group-title">3D</div>
+    <label class="toggle">Rotation automatique <input type="checkbox" id="autoRotate"></label>
+    <label class="toggle">Lueur des nœuds <input type="checkbox" id="bloom"></label>
+    <div class="group-title">Affichage</div>
+    <label class="slider"><span>Taille des nœuds <output id="o-size"></output></span><input type="range" id="size" min="0.4" max="2.5" step="0.05"></label>
+    <label class="slider"><span>Épaisseur des liens <output id="o-thick"></output></span><input type="range" id="thick" min="0.3" max="4" step="0.1"></label>
+    <div class="row">
+      <button class="btn" id="fit">Recentrer</button>
+      <button class="btn" id="closeAll">Fermer les bulles</button>
+    </div>
+    <button class="btn" id="reset">Réglages par défaut</button>
+  </div>
+</details>
+
+<div id="legend" class="panel"></div>
+<div id="status" class="panel"><i></i><span id="status-text">Connexion…</span><span id="help"></span></div>
+
+<script>
+'use strict'
+
+// ---------- Couleurs par type d'action (les mêmes que le panneau) ----------
+const CATS = {
+  read:   { label: 'Lecture',   color: '#4FA3FF' },
+  search: { label: 'Recherche', color: '#A970FF' },
+  edit:   { label: 'Écriture',  color: '#FF9F43' },
+  shell:  { label: 'Commande',  color: '#3DDC84' },
+  web:    { label: 'Web',       color: '#22D3EE' },
+  agent:  { label: 'Agents',    color: '#FF5FA2' },
+  mcp:    { label: 'Outil MCP', color: '#F7D046' },
+  other:  { label: 'Autre',     color: '#9AA4B2' },
+}
+const THINKING = '#C8B6FF', IDLE = '#5B6475', FAILED = '#FF4D4F', MAIN = 'main'
+const STATE_LABEL = { running: 'en cours', done: 'terminé', failed: 'échec', stopped: 'arrêté' }
+
+function categorize(tool) {
+  if (/^(Read|NotebookRead)$/.test(tool)) return 'read'
+  if (/^(Grep|Glob|ToolSearch|LS)$/.test(tool)) return 'search'
+  if (/^(Edit|Write|MultiEdit|NotebookEdit)$/.test(tool)) return 'edit'
+  if (/^(Bash|PowerShell|Monitor|BashOutput|KillShell|TaskStop)$/.test(tool)) return 'shell'
+  if (/^(WebFetch|WebSearch)$/.test(tool) || /browser|chrome/i.test(tool)) return 'web'
+  if (/^(Agent|Task|SendMessage|ListAgents)$/.test(tool)) return 'agent'
+  if (tool.startsWith('mcp__')) return 'mcp'
+  return 'other'
+}
+const shortTool = t => t.startsWith('mcp__') ? (t.split('__').pop() || t) : t
+const clip = (s, n) => s.length > n ? s.slice(0, n - 1) + '…' : s
+function fmtDur(ms) {
+  const s = Math.max(0, Math.round(ms / 1000))
+  if (s < 60) return s + 's'
+  const m = Math.floor(s / 60)
+  return m < 60 ? `${m}m${String(s % 60).padStart(2, '0')}` : `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}`
+}
+function agentColor(a) {
+  if (a.state === 'failed') return FAILED
+  if (a.state !== 'running') return IDLE
+  if (a.currentToolName) return CATS[categorize(a.currentToolName)].color
+  return THINKING
+}
+
+// ---------- Réglages (gardés dans le navigateur) ----------
+const DEFAULTS = { center: 0.1, repel: 11, link: 0.45, dist: 85, size: 1, thick: 1, showActions: true, hideDone: false, allLabels: false, hiddenCats: [], mode: '2d', autoRotate: false, bloom: true }
+let cfg = { ...DEFAULTS }
+try { Object.assign(cfg, JSON.parse(localStorage.getItem('agent-graph-cfg') || '{}')) } catch {}
+const saveCfg = () => { try { localStorage.setItem('agent-graph-cfg', JSON.stringify(cfg)) } catch {} }
+const hiddenCats = new Set(cfg.hiddenCats)
+
+// ---------- Données ----------
+let raw = { agents: [], actions: [], now: Date.now() }
+let receivedAt = Date.now()
+const nowEst = () => raw.now + (Date.now() - receivedAt)
+
+/** Nœuds par id : { id, kind, x, y, vx, vy, fx, fy, r, color, label, ref } */
+const nodes = new Map()
+let links = []          // { s, t, kind }
+let neighbors = new Map()
+let alpha = 1, alphaTarget = 0
+
+function rebuild() {
+  const agents = raw.agents.filter(a => !cfg.hideDone || a.state === 'running' || a.id === MAIN)
+  if (!agents.some(a => a.id === MAIN)) agents.unshift({ id: MAIN, type: 'principal', description: 'Agent principal', state: 'done', startedAt: raw.now, toolCount: 0, recentTools: [] })
+  const agentIds = new Set(agents.map(a => a.id))
+  const parentOf = a => a.id === MAIN ? null : (a.parentId && agentIds.has(a.parentId) ? a.parentId : MAIN)
+
+  const wanted = new Map()
+  const newLinks = []
+  const degree = new Map()
+  const bump = id => degree.set(id, (degree.get(id) || 0) + 1)
+
+  for (const a of agents) {
+    const id = 'ag:' + a.id
+    wanted.set(id, { kind: 'agent', ref: a, color: agentColor(a), label: a.description || a.type })
+    const p = parentOf(a)
+    if (p) { newLinks.push({ s: id, t: 'ag:' + p, kind: 'agent' }); bump(id); bump('ag:' + p) }
+  }
+  if (cfg.showActions) {
+    const acts = raw.actions.filter(x => agentIds.has(x.agentId) && !hiddenCats.has(categorize(x.tool))).slice(-220)
+    for (const x of acts) {
+      const id = 'ac:' + x.id
+      const cat = categorize(x.tool)
+      const det = x.detail ? ' ' + (x.detail.split(/[\\/]/).pop() || x.detail) : ''
+      wanted.set(id, { kind: 'action', ref: x, color: x.isError ? FAILED : CATS[cat].color, label: clip(shortTool(x.tool) + det, 28), cat })
+      newLinks.push({ s: id, t: 'ag:' + x.agentId, kind: 'action' }); bump(id); bump('ag:' + x.agentId)
+    }
+  }
+
+  let added = 0
+  for (const id of [...nodes.keys()]) if (!wanted.has(id)) nodes.delete(id)
+  for (const [id, w] of wanted) {
+    let n = nodes.get(id)
+    if (!n) {
+      // Un nouveau nœud naît près de celui auquel il est relié
+      const link = newLinks.find(l => l.s === id)
+      const anchor = link && nodes.get(link.t)
+      const ang = Math.random() * Math.PI * 2
+      const d = anchor ? 25 + Math.random() * 25 : Math.random() * 60
+      n = { id, x: (anchor ? anchor.x : 0) + Math.cos(ang) * d, y: (anchor ? anchor.y : 0) + Math.sin(ang) * d, vx: 0, vy: 0, fx: null, fy: null }
+      nodes.set(id, n); added++
+    }
+    Object.assign(n, w)
+    const deg = degree.get(id) || 0
+    n.baseR = w.kind === 'agent' ? Math.min(24, (id === 'ag:' + MAIN ? 11 : 8) + Math.sqrt(deg) * 1.6) : 3.6
+  }
+  links = newLinks.filter(l => nodes.has(l.s) && nodes.has(l.t))
+  neighbors = new Map()
+  for (const l of links) {
+    if (!neighbors.has(l.s)) neighbors.set(l.s, new Set())
+    if (!neighbors.has(l.t)) neighbors.set(l.t, new Set())
+    neighbors.get(l.s).add(l.t); neighbors.get(l.t).add(l.s)
+  }
+  if (added) alpha = Math.max(alpha, added > 20 ? 0.8 : 0.35)
+  renderLegend()
+  refreshBubbles()
+  updateStats()
+  if (mode === '3d') sync3D()
+}
+
+// ---------- Physique (dans l'esprit de la vue graphe d'Obsidian) ----------
+function tick() {
+  const list = [...nodes.values()]
+  alpha += (alphaTarget - alpha) * 0.02
+  if (alpha < 0.004 && alphaTarget === 0) return
+  const repel = cfg.repel * 40
+  for (let i = 0; i < list.length; i++) {
+    const a = list[i]
+    for (let j = i + 1; j < list.length; j++) {
+      const b = list[j]
+      let dx = b.x - a.x, dy = b.y - a.y
+      let d2 = dx * dx + dy * dy
+      if (d2 < 0.01) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d2 = 0.25 }
+      if (d2 > 250000) continue
+      const ma = a.kind === 'agent' ? 3 : 1, mb = b.kind === 'agent' ? 3 : 1
+      const f = repel * alpha / d2
+      a.vx -= dx * f * mb / ma; a.vy -= dy * f * mb / ma
+      b.vx += dx * f * ma / mb; b.vy += dy * f * ma / mb
+    }
+  }
+  for (const l of links) {
+    const a = nodes.get(l.s), b = nodes.get(l.t)
+    let dx = b.x - a.x, dy = b.y - a.y
+    const d = Math.sqrt(dx * dx + dy * dy) || 1
+    const target = l.kind === 'agent' ? cfg.dist * 2.2 : cfg.dist * 0.55
+    const k = (d - target) / d * cfg.link * alpha * 0.5
+    const wa = b.kind === 'agent' && a.kind !== 'agent' ? 0.85 : 0.5
+    a.vx += dx * k * wa; a.vy += dy * k * wa
+    b.vx -= dx * k * (1 - wa); b.vy -= dy * k * (1 - wa)
+  }
+  for (const n of list) {
+    n.vx -= n.x * cfg.center * 0.02 * alpha
+    n.vy -= n.y * cfg.center * 0.02 * alpha
+    if (n.fx != null) { n.x = n.fx; n.y = n.fy; n.vx = n.vy = 0; continue }
+    n.vx *= 0.6; n.vy *= 0.6
+    n.x += n.vx; n.y += n.vy
+  }
+}
+
+// ---------- Caméra : zoom à la molette, déplacement en glissant le fond ----------
+const canvas = document.getElementById('c')
+const ctx = canvas.getContext('2d')
+let W = 0, H = 0, dpr = 1
+const cam = { x: 0, y: 0, k: 1 }   // écran = monde * k + (W/2 + x, H/2 + y)
+function resize() {
+  dpr = window.devicePixelRatio || 1
+  W = window.innerWidth; H = window.innerHeight
+  canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr)
+  if (window.onResize3D) window.onResize3D()
+}
+window.addEventListener('resize', resize); resize()
+// Rayon dans le monde : en dézoomant, les nœuds rétrécissent moins vite que le graphe (comme dans Obsidian)
+const nodeR = n => n.baseR * cfg.size * (cam.k < 1 ? 1 / Math.sqrt(cam.k) : 1)
+const toScreen = (x, y) => [x * cam.k + W / 2 + cam.x, y * cam.k + H / 2 + cam.y]
+const toWorld = (sx, sy) => [(sx - W / 2 - cam.x) / cam.k, (sy - H / 2 - cam.y) / cam.k]
+
+let camAnim = null
+function fit(animate = true) {
+  if (mode === '3d') { if (G) G.zoomToFit(700, 80); return }
+  fit2D(animate)
+}
+function fit2D(animate) {
+  const list = [...nodes.values()]
+  if (!list.length) return
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
+  for (const n of list) { x0 = Math.min(x0, n.x); y0 = Math.min(y0, n.y); x1 = Math.max(x1, n.x); y1 = Math.max(y1, n.y) }
+  const pad = 90
+  const k = Math.max(0.1, Math.min(2.2, Math.min((W - pad * 2) / Math.max(1, x1 - x0), (H - pad * 2) / Math.max(1, y1 - y0))))
+  const target = { k, x: -((x0 + x1) / 2) * k, y: -((y0 + y1) / 2) * k }
+  if (!animate) { Object.assign(cam, target); return }
+  camAnim = { from: { ...cam }, to: target, t0: performance.now() }
+}
+
+canvas.addEventListener('wheel', ev => {
+  ev.preventDefault()
+  camAnim = null
+  const [wx, wy] = toWorld(ev.clientX, ev.clientY)
+  const factor = Math.exp(-ev.deltaY * (ev.ctrlKey ? 0.01 : 0.0015))
+  cam.k = Math.max(0.05, Math.min(8, cam.k * factor))
+  cam.x = ev.clientX - W / 2 - wx * cam.k
+  cam.y = ev.clientY - H / 2 - wy * cam.k
+}, { passive: false })
+
+function hitNode(sx, sy) {
+  const [wx, wy] = toWorld(sx, sy)
+  let best = null, bestD = Infinity
+  for (const n of nodes.values()) {
+    const r = nodeR(n) + 5 / cam.k
+    const d = Math.hypot(n.x - wx, n.y - wy)
+    if (d < r && d < bestD) { best = n; bestD = d }
+  }
+  return best
+}
+
+let hover = null
+let drag = null   // { kind: 'node'|'pan', node, sx, sy, moved, camX, camY }
+canvas.addEventListener('pointerdown', ev => {
+  if (ev.button !== 0) return
+  canvas.setPointerCapture(ev.pointerId)
+  camAnim = null
+  const n = hitNode(ev.clientX, ev.clientY)
+  if (n) {
+    drag = { kind: 'node', node: n, sx: ev.clientX, sy: ev.clientY, moved: false }
+    n.fx = n.x; n.fy = n.y
+    alphaTarget = 0.25; alpha = Math.max(alpha, 0.25)
+    canvas.classList.add('dragging')
+  } else {
+    drag = { kind: 'pan', sx: ev.clientX, sy: ev.clientY, camX: cam.x, camY: cam.y, moved: false }
+    canvas.classList.add('panning')
+  }
+})
+canvas.addEventListener('pointermove', ev => {
+  if (drag) {
+    const dx = ev.clientX - drag.sx, dy = ev.clientY - drag.sy
+    if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true
+    if (drag.kind === 'node') {
+      const [wx, wy] = toWorld(ev.clientX, ev.clientY)
+      drag.node.fx = wx; drag.node.fy = wy
+    } else {
+      cam.x = drag.camX + dx; cam.y = drag.camY + dy
+    }
+    return
+  }
+  const n = hitNode(ev.clientX, ev.clientY)
+  hover = n
+  canvas.classList.toggle('on-node', !!n)
+})
+function endDrag(ev) {
+  if (!drag) return
+  if (drag.kind === 'node') {
+    const n = drag.node
+    n.fx = n.fy = null
+    alphaTarget = 0
+    if (!drag.moved) toggleBubble(n.id, ev.clientX, ev.clientY)
+  }
+  drag = null
+  canvas.classList.remove('dragging', 'panning')
+}
+canvas.addEventListener('pointerup', endDrag)
+canvas.addEventListener('pointercancel', endDrag)
+canvas.addEventListener('pointerleave', () => { if (!drag) hover = null })
+canvas.addEventListener('dblclick', ev => { if (!hitNode(ev.clientX, ev.clientY)) fit() })
+window.addEventListener('keydown', ev => {
+  if (ev.target instanceof HTMLInputElement) return
+  if (ev.key === 'Escape') closeAllBubbles()
+  if (ev.key === 'f' || ev.key === 'F') fit()
+})
+
+// ---------- Bulles d'information ----------
+const bubbleLayer = document.getElementById('bubbles')
+const bubbles = new Map()   // id -> { el, ox, oy, lastX, lastY }
+
+function toggleBubble(id, sx, sy) {
+  if (bubbles.has(id)) { closeBubble(id); return }
+  const n = nodes.get(id)
+  if (!n) return
+  const el = document.createElement('div')
+  el.className = 'bubble'
+  const [nx, ny] = nodeScreen(id) || [W / 2, H / 2]
+  // Placée à droite du nœud, ou à gauche si la place manque
+  const bw = Math.min(320, W - 24)
+  let left = nx + 22 + bw > W - 8 ? nx - 22 - bw : nx + 22
+  left = Math.max(8, Math.min(W - bw - 8, left))
+  const top = Math.max(8, Math.min(H - 240, ny - 30))
+  const b = { el, ox: left - nx, oy: top - ny, lastX: nx, lastY: ny }
+  bubbles.set(id, b)
+  bubbleLayer.appendChild(el)
+  makeDraggable(el, b)
+  fillBubble(id)
+}
+function closeBubble(id) {
+  const b = bubbles.get(id)
+  if (b) { b.el.remove(); bubbles.delete(id) }
+}
+function closeAllBubbles() { for (const id of [...bubbles.keys()]) closeBubble(id) }
+
+function makeDraggable(el, b) {
+  let start = null
+  el.addEventListener('pointerdown', ev => {
+    if (ev.button !== 0 || ev.target.closest('button, pre')) return
+    ev.preventDefault()
+    el.setPointerCapture(ev.pointerId)
+    start = { x: ev.clientX, y: ev.clientY, ox: b.ox, oy: b.oy }
+    el.classList.add('grabbing')
+    bubbleLayer.appendChild(el)   // passe au premier plan
+  })
+  el.addEventListener('pointermove', ev => {
+    if (!start) return
+    b.ox = start.ox + ev.clientX - start.x
+    b.oy = start.oy + ev.clientY - start.y
+    placeBubble(b)
+  })
+  const stop = () => { start = null; el.classList.remove('grabbing') }
+  el.addEventListener('pointerup', stop)
+  el.addEventListener('pointercancel', stop)
+}
+function placeBubble(b) {
+  b.el.style.left = Math.round(b.lastX + b.ox) + 'px'
+  b.el.style.top = Math.round(b.lastY + b.oy) + 'px'
+}
+
+// Construit le contenu avec textContent : les commandes et chemins ne sont jamais interprétés comme du HTML
+function h(tag, props = {}, ...kids) {
+  const el = document.createElement(tag)
+  for (const [k, v] of Object.entries(props)) {
+    if (k === 'style') el.setAttribute('style', v)
+    else if (k === 'class') el.className = v
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v)
+    else el.setAttribute(k, v)
+  }
+  for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid instanceof Node ? kid : String(kid))
+  return el
+}
+const dot = color => h('i', { style: `background:${color}` })
+
+function fillBubble(id) {
+  const b = bubbles.get(id)
+  if (!b) return
+  const n = nodes.get(id)
+  const el = b.el
+  el.replaceChildren()
+  if (!n) {
+    el.append(h('header', {}, h('i'), h('b', {}, 'Nœud retiré'), h('button', { title: 'Fermer', onclick: () => closeBubble(id) }, '×')),
+      h('div', { class: 'body' }, h('div', { class: 'gone' }, 'Ce nœud n\'est plus dans le graphe (filtré ou effacé).')))
+    return
+  }
+  el.style.setProperty('--c', n.color)
+  const now = nowEst()
+  const close = h('button', { title: 'Fermer', onclick: () => closeBubble(id) }, '×')
+  if (n.kind === 'agent') {
+    const a = n.ref
+    const acts = raw.actions.filter(x => x.agentId === a.id)
+    const recent = acts.slice(-6).reverse()
+    const current = a.state === 'running' ? (a.currentTool || 'réflexion…') : '—'
+    const curColor = a.currentToolName ? CATS[categorize(a.currentToolName)].color : THINKING
+    el.append(
+      h('header', {}, h('i'), h('b', { title: a.description }, a.description || a.type), close),
+      h('div', { class: 'body' },
+        h('div', { class: 'meta' }, [a.type, a.model, a.isBackground ? 'arrière-plan' : null].filter(Boolean).join(' · ')),
+        h('div', {}, h('span', { class: 'chip' }, dot(n.color), STATE_LABEL[a.state] || a.state), '  ',
+          fmtDur((a.endedAt ?? now) - a.startedAt), ' · ', a.toolCount, a.toolCount > 1 ? ' outils' : ' outil'),
+        h('div', {}, 'Action : ', a.state === 'running' ? h('span', { class: 'chip' }, dot(curColor), clip(current, 60)) : '—'),
+        recent.length ? h('div', { class: 'meta' }, 'Dernières actions') : null,
+        recent.length ? h('ul', {}, recent.map(x => h('li', {},
+          dot(x.isError ? FAILED : CATS[categorize(x.tool)].color),
+          h('span', { title: x.detail }, shortTool(x.tool) + (x.detail ? ' · ' + x.detail : '')),
+          h('em', {}, x.endedAt === undefined ? 'en cours' : fmtDur(x.endedAt - x.startedAt))))) : null,
+      ),
+    )
+  } else {
+    const x = n.ref
+    const cat = categorize(x.tool)
+    const running = x.endedAt === undefined
+    const owner = raw.agents.find(a => a.id === x.agentId)
+    el.append(
+      h('header', {}, h('i'), h('b', {}, CATS[cat].label + ' — ' + shortTool(x.tool)), close),
+      h('div', { class: 'body' },
+        x.tool !== shortTool(x.tool) ? h('div', { class: 'meta' }, x.tool) : null,
+        x.detail ? h('pre', {}, x.detail) : h('div', { class: 'meta' }, '(sans argument)'),
+        h('div', {}, 'Agent : ', owner ? owner.description : x.agentId),
+        h('div', {}, h('span', { class: 'chip' }, dot(x.isError ? FAILED : running ? THINKING : '#3DDC84'),
+          running ? 'en cours depuis ' + fmtDur(now - x.startedAt) : x.isError ? 'échec après ' + fmtDur(x.endedAt - x.startedAt) : 'terminé en ' + fmtDur(x.endedAt - x.startedAt))),
+      ),
+    )
+  }
+}
+function refreshBubbles() { for (const id of bubbles.keys()) fillBubble(id) }
+setInterval(refreshBubbles, 1000)
+
+// ---------- Légende (clic = masquer / afficher une catégorie) ----------
+const legendEl = document.getElementById('legend')
+function renderLegend() {
+  const counts = {}
+  for (const x of raw.actions) { const c = categorize(x.tool); counts[c] = (counts[c] || 0) + 1 }
+  legendEl.replaceChildren(
+    ...Object.entries(CATS).filter(([c]) => counts[c] || hiddenCats.has(c)).map(([c, v]) =>
+      h('span', { class: 'lg' + (hiddenCats.has(c) ? ' off' : ''), title: 'Cliquer pour masquer / afficher', onclick: () => {
+        hiddenCats.has(c) ? hiddenCats.delete(c) : hiddenCats.add(c)
+        cfg.hiddenCats = [...hiddenCats]; saveCfg(); rebuild()
+      } }, dot(v.color), `${v.label} (${counts[c] || 0})`)),
+    h('span', { class: 'lg static' }, dot(THINKING), 'Réflexion'),
+    h('span', { class: 'lg static' }, dot(IDLE), 'Terminé'),
+    h('span', { class: 'lg static' }, dot(FAILED), 'Échec'),
+  )
+}
+
+// ---------- Recherche ----------
+const searchEl = document.getElementById('search')
+let query = ''
+searchEl.addEventListener('input', () => { query = searchEl.value.trim().toLowerCase(); restyle3D() })
+function matches(n) {
+  if (!query) return true
+  const r = n.ref
+  const text = n.kind === 'agent' ? `${r.description} ${r.type} ${r.model || ''}` : `${r.tool} ${r.detail}`
+  return text.toLowerCase().includes(query)
+}
+
+function updateStats() {
+  const subs = raw.agents.filter(a => a.id !== MAIN)
+  const running = subs.filter(a => a.state === 'running').length
+  document.getElementById('stats').textContent =
+    `${running} actif${running > 1 ? 's' : ''} · ${subs.length} sous-agent${subs.length > 1 ? 's' : ''} · ${raw.actions.length} action${raw.actions.length > 1 ? 's' : ''}`
+}
+
+// ---------- Dessin ----------
+function draw(t) {
+  if (camAnim) {
+    const p = Math.min(1, (t - camAnim.t0) / 450), e = 1 - Math.pow(1 - p, 3)
+    for (const k of ['x', 'y', 'k']) cam[k] = camAnim.from[k] + (camAnim.to[k] - camAnim.from[k]) * e
+    if (p >= 1) camAnim = null
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.fillStyle = '#0b0d12'
+  ctx.fillRect(0, 0, W, H)
+
+  const focus = drag && drag.kind === 'node' ? drag.node : hover
+  const near = focus ? neighbors.get(focus.id) || new Set() : null
+  const lit = n => !focus || n === focus || near.has(n.id)
+  const searchOn = !!query
+
+  ctx.setTransform(dpr * cam.k, 0, 0, dpr * cam.k, dpr * (W / 2 + cam.x), dpr * (H / 2 + cam.y))
+
+  // Liens
+  for (const l of links) {
+    const a = nodes.get(l.s), b = nodes.get(l.t)
+    const on = focus && (a === focus || b === focus)
+    ctx.globalAlpha = on ? 0.95 : focus ? 0.06 : searchOn ? 0.08 : (l.kind === 'agent' ? 0.45 : 0.22)
+    ctx.strokeStyle = on ? a.color : l.kind === 'agent' ? '#4a5263' : '#3a4150'
+    ctx.lineWidth = (on ? 1.8 : l.kind === 'agent' ? 1.4 : 0.8) * cfg.thick / Math.sqrt(cam.k)
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke()
+  }
+
+  // Nœuds
+  const pulse = (t % 1600) / 1600
+  const ordered = [...nodes.values()].sort((a, b) => (a.kind === 'agent') - (b.kind === 'agent'))
+  for (const n of ordered) {
+    const r = nodeR(n)
+    const dim = (focus && !lit(n)) || (searchOn && !matches(n))
+    ctx.globalAlpha = dim ? 0.12 : 1
+    const running = n.kind === 'agent' ? n.ref.state === 'running' : n.ref.endedAt === undefined
+    if (running && !dim) {
+      ctx.globalAlpha = 0.8 * (1 - pulse)
+      ctx.strokeStyle = n.color; ctx.lineWidth = 1.6 / cam.k
+      ctx.beginPath(); ctx.arc(n.x, n.y, r * (1 + pulse * 1.4) + 1 / cam.k, 0, Math.PI * 2); ctx.stroke()
+      ctx.globalAlpha = 1
+    }
+    if (n === focus) {
+      ctx.shadowColor = n.color; ctx.shadowBlur = 18
+    }
+    ctx.fillStyle = n.color
+    ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2); ctx.fill()
+    ctx.shadowBlur = 0
+    if (n === focus || bubbles.has(n.id) || (searchOn && matches(n) && query)) {
+      ctx.strokeStyle = n.color; ctx.lineWidth = 2 / cam.k
+      ctx.beginPath(); ctx.arc(n.x, n.y, r + 4 / cam.k, 0, Math.PI * 2); ctx.stroke()
+    }
+    if (n.kind === 'action' && n.ref.isError && !dim) {
+      ctx.strokeStyle = FAILED; ctx.lineWidth = 1.5 / cam.k
+      ctx.beginPath(); ctx.arc(n.x, n.y, r + 2 / cam.k, 0, Math.PI * 2); ctx.stroke()
+    }
+  }
+
+  // Libellés : comme dans Obsidian, ils apparaissent en zoomant
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top'
+  const actionFade = cfg.allLabels ? 1 : Math.max(0, Math.min(1, (cam.k - 0.9) / 0.6))
+  const agentFade = cfg.allLabels ? 1 : Math.max(0, Math.min(1, (cam.k - 0.06) / 0.08))
+  for (const n of ordered) {
+    const highlighted = n === focus || (focus && lit(n)) || bubbles.has(n.id) || (searchOn && matches(n))
+    let a = n.kind === 'agent' ? agentFade : actionFade
+    if (highlighted) a = 1
+    if ((focus && !lit(n)) || (searchOn && !matches(n))) a = Math.min(a, 0.1)
+    if (a <= 0.02) continue
+    const [sx, sy] = toScreen(n.x, n.y)
+    if (sx < -200 || sx > W + 200 || sy < -50 || sy > H + 50) continue
+    const r = nodeR(n) * cam.k
+    ctx.globalAlpha = a
+    ctx.font = n.kind === 'agent' ? '600 12.5px system-ui, sans-serif' : '11px system-ui, sans-serif'
+    ctx.fillStyle = n === focus ? '#ffffff' : n.kind === 'agent' ? '#e6e8ee' : '#9aa1b0'
+    ctx.fillText(clip(n.label, n.kind === 'agent' ? 40 : 30), sx, sy + r + 5)
+  }
+  ctx.globalAlpha = 1
+
+  drawBubbleLinks(ctx)
+}
+
+// Bulles : elles suivent leur nœud (en 2D comme en 3D) ; un trait pointillé les relie à lui
+function nodeScreen(id) {
+  if (mode === '3d' && G) {
+    const o = n3.get(id)
+    if (!o || o.x === undefined) return null
+    const p = G.graph2ScreenCoords(o.x, o.y, o.z)
+    return [p.x, p.y]
+  }
+  const n = nodes.get(id)
+  return n ? toScreen(n.x, n.y) : null
+}
+function drawBubbleLinks(c) {
+  for (const [id, b] of bubbles) {
+    const p = nodeScreen(id)
+    if (p) { b.lastX = p[0]; b.lastY = p[1] }
+    placeBubble(b)
+    const n = nodes.get(id)
+    if (!p || !n) continue
+    const rect = b.el.getBoundingClientRect()
+    const cx = Math.max(rect.left, Math.min(b.lastX, rect.right))
+    const cy = Math.max(rect.top, Math.min(b.lastY, rect.bottom))
+    c.strokeStyle = n.color; c.globalAlpha = 0.6; c.lineWidth = 1.2
+    c.setLineDash([4, 4])
+    c.beginPath(); c.moveTo(b.lastX, b.lastY); c.lineTo(cx, cy); c.stroke()
+    c.setLineDash([]); c.globalAlpha = 1
+  }
+}
+
+function loop(t) {
+  if (mode === '2d') {
+    tick()
+    draw(t)
+  } else {
+    updateGlows(t)
+    octx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    octx.clearRect(0, 0, W, H)
+    drawBubbleLinks(octx)
+  }
+  requestAnimationFrame(loop)
+}
+
+// ---------- Vue 3D (three.js + 3d-force-graph, chargés seulement au passage en 3D) ----------
+const LIB_3D = 'https://cdn.jsdelivr.net/npm/3d-force-graph@1.77.0/dist/3d-force-graph.min.js'
+const LIB_3D_SRI = 'sha384-LPDOi9GJtMLOTUwn16B77nCwZUN+OyFozMjJddWwf7EXi7Bzog8ZaclbVm0bay3e'
+const HELP_2D = '· molette : zoom · glisser : déplacer · clic : détail'
+const HELP_3D = '· glisser : tourner · clic droit : déplacer · molette : zoom · clic : détail'
+const g3dEl = document.getElementById('g3d')
+const ov = document.getElementById('ov')
+const octx = ov.getContext('2d')
+ov.width = canvas.width; ov.height = canvas.height
+let mode = cfg.mode === '3d' ? '3d' : '2d'
+let G = null, THREE = null, glowTexture = null, SpriteText = null, loading3D = null
+let hover3 = null, litIds = null, sig3 = '', fitted3D = false
+/** Nœuds de la scène 3D par id : le même objet est gardé d'une mise à jour à l'autre, pour garder sa position */
+const n3 = new Map()
+
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
+function mix(hex, to, t) {
+  const a = parseInt(hex.slice(1), 16), b = parseInt(to.slice(1), 16)
+  const ch = (x, s) => (x >> s) & 255
+  const m = s => Math.round(ch(a, s) + (ch(b, s) - ch(a, s)) * t)
+  return '#' + ((1 << 24) | (m(16) << 16) | (m(8) << 8) | m(0)).toString(16).slice(1)
+}
+const endNode = (l, key) => (typeof l[key] === 'object' ? l[key] : n3.get(l[key]))
+const isRunning = o => !!o && (o.kind === 'action' ? o.ref.endedAt === undefined : o.ref.state === 'running')
+
+function loadScript(src, integrity) {
+  return new Promise((resolve, reject) => {
+    const el = document.createElement('script')
+    el.src = src
+    el.integrity = integrity
+    el.crossOrigin = 'anonymous'
+    el.onload = resolve
+    el.onerror = () => reject(new Error('Chargement impossible : ' + src))
+    document.head.appendChild(el)
+  })
+}
+
+// Couleurs : au survol, le nœud et ses voisins gardent leur couleur, le reste s'efface dans le fond
+function color3(o) {
+  const dim = (litIds && !litIds.has(o.id)) || (query && !matches(o))
+  if (dim) return mix(o.color, '#0b0d12', 0.8)
+  return o === hover3 ? mix(o.color, '#ffffff', 0.3) : o.color
+}
+function linkColor3(l) {
+  const s = endNode(l, 'source'), t = endNode(l, 'target')
+  if (hover3 && (s === hover3 || t === hover3)) return s.color
+  if (litIds || query) return '#161a22'
+  return l.kind === 'agent' ? '#5a6478' : '#353c4b'
+}
+function linkWidth3(l) {
+  const s = endNode(l, 'source'), t = endNode(l, 'target')
+  if (hover3 && (s === hover3 || t === hover3)) return 1.3 * cfg.thick
+  return l.kind === 'agent' ? 0.7 * cfg.thick : 0
+}
+function tooltip3(o) {
+  const r = o.ref
+  if (o.kind === 'agent') {
+    const what = r.state === 'running' ? (r.currentTool || 'réflexion…') : (STATE_LABEL[r.state] || r.state)
+    return `<b>${esc(r.description || r.type)}</b><br><span style="color:#8b93a3">${esc(r.type)} · ${esc(what)}</span>`
+  }
+  return `<b>${esc(shortTool(r.tool))}</b><br><span style="color:#8b93a3">${esc(clip(r.detail || '(sans argument)', 90))}</span>`
+}
+// Libellés en texte flottant : toujours pour les agents, pour les actions si l'option est cochée
+function label3(o) {
+  if (!SpriteText || (o.kind !== 'agent' && !cfg.allLabels)) return null
+  const isAgent = o.kind === 'agent'
+  const sprite = new SpriteText(clip(o.label, isAgent ? 40 : 28), isAgent ? 9 : 4, isAgent ? '#d9dce4' : '#8f97a6')
+  sprite.fontFace = 'system-ui, sans-serif'
+  sprite.fontWeight = isAgent ? '600' : '400'
+  sprite.material.depthWrite = false
+  const r = Math.cbrt(o.val) * 4 * cfg.size
+  sprite.position.set(0, -(r + (isAgent ? 9 : 5)), 0)
+  return sprite
+}
+
+// Halo lumineux autour de chaque nœud (un sprite en dégradé, mélangé en additif) : la « lueur » sans post-traitement
+function makeGlowTexture() {
+  const c = document.createElement('canvas')
+  c.width = c.height = 128
+  const g = c.getContext('2d')
+  const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64)
+  grd.addColorStop(0, 'rgba(255,255,255,0.85)')
+  grd.addColorStop(0.22, 'rgba(255,255,255,0.4)')
+  grd.addColorStop(0.55, 'rgba(255,255,255,0.08)')
+  grd.addColorStop(1, 'rgba(255,255,255,0)')
+  g.fillStyle = grd
+  g.fillRect(0, 0, 128, 128)
+  return new THREE.CanvasTexture(c)
+}
+function glowOpacity(o) {
+  if ((litIds && !litIds.has(o.id)) || (query && !matches(o))) return 0.04
+  if (o === hover3) return 0.95
+  return o.kind === 'agent' ? 0.6 : 0.45
+}
+function nodeObject3(o) {
+  const group = new THREE.Group()
+  const r = Math.cbrt(o.val) * 4 * cfg.size
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: glowTexture,
+    color: o.color,
+    transparent: true,
+    opacity: glowOpacity(o),
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  }))
+  o.__glowBase = r * (o.kind === 'agent' ? 4.2 : 5)
+  glow.scale.set(o.__glowBase, o.__glowBase, 1)
+  glow.visible = !!cfg.bloom
+  o.__glow = glow
+  group.add(glow)
+  const label = label3(o)
+  if (label) group.add(label)
+  return group
+}
+// Met à jour les halos sans recréer les objets ; ceux des nœuds actifs pulsent
+function updateGlows(t) {
+  for (const o of n3.values()) {
+    const glow = o.__glow
+    if (!glow) continue
+    glow.visible = !!cfg.bloom
+    glow.material.color.set(o.color)
+    glow.material.opacity = glowOpacity(o)
+    const s = o.__glowBase * (isRunning(o) ? 1 + 0.35 * (0.5 + 0.5 * Math.sin(t / 240)) : 1)
+    glow.scale.set(s, s, 1)
+  }
+}
+
+function ensure3D() {
+  if (G) return Promise.resolve()
+  if (loading3D) return loading3D
+  loading3D = (async () => {
+    await loadScript(LIB_3D, LIB_3D_SRI)
+    THREE = await import('three')
+    glowTexture = makeGlowTexture()
+    SpriteText = (await import('three-spritetext')).default
+    G = window.ForceGraph3D({ controlType: 'orbit' })(g3dEl)
+      .width(W).height(H)
+      .backgroundColor('#0b0d12')
+      .showNavInfo(false)
+      .nodeId('id')
+      .nodeVal(o => o.val)
+      .nodeRelSize(4 * cfg.size)
+      .nodeResolution(20)
+      .nodeOpacity(0.95)
+      .nodeColor(color3)
+      .nodeLabel(tooltip3)
+      .nodeThreeObjectExtend(true)
+      .nodeThreeObject(nodeObject3)
+      .linkColor(linkColor3)
+      .linkWidth(linkWidth3)
+      .linkOpacity(0.5)
+      // Des particules circulent sur le lien d'un agent ou d'une action en cours
+      .linkDirectionalParticles(l => (isRunning(endNode(l, 'source')) ? 3 : 0))
+      .linkDirectionalParticleWidth(1.8)
+      .linkDirectionalParticleSpeed(0.011)
+      .linkDirectionalParticleColor(l => endNode(l, 'source')?.color || '#ffffff')
+      .onNodeHover(o => {
+        hover3 = o || null
+        g3dEl.style.cursor = o ? 'pointer' : ''
+        restyle3D()
+      })
+      .onNodeClick(o => toggleBubble(o.id))
+      .onNodeDragEnd(o => { o.fx = o.fy = o.fz = undefined })
+    apply3DForces()
+    apply3DLook()
+  })()
+  loading3D.catch(() => { loading3D = null })
+  return loading3D
+}
+
+function apply3DForces() {
+  if (!G) return
+  G.d3Force('charge').strength(-cfg.repel * 7)
+  // Sous-agents loin de leur parent, actions en grappe serrée autour de leur agent
+  G.d3Force('link')
+    .distance(l => (l.kind === 'agent' ? cfg.dist * 3 : cfg.dist * 0.35))
+    .strength(l => (l.kind === 'agent' ? 0.15 + cfg.link * 0.5 : 0.05 + cfg.link * 1.2))
+  const center = G.d3Force('center')
+  if (center && typeof center.strength === 'function') center.strength(Math.max(0.01, cfg.center))
+  if (G.nodeRelSize() !== 4 * cfg.size) {
+    G.nodeRelSize(4 * cfg.size)
+    G.nodeThreeObject(G.nodeThreeObject())
+  }
+  G.linkWidth(G.linkWidth())
+  G.d3ReheatSimulation()
+}
+function apply3DLook() {
+  if (!G) return
+  const controls = G.controls()
+  controls.autoRotate = !!cfg.autoRotate
+  controls.autoRotateSpeed = 0.8
+}
+function restyle3D() {
+  if (!G) return
+  litIds = hover3 ? new Set([hover3.id, ...(neighbors.get(hover3.id) || [])]) : null
+  G.nodeColor(G.nodeColor())
+    .linkColor(G.linkColor())
+    .linkWidth(G.linkWidth())
+    .linkDirectionalParticles(G.linkDirectionalParticles())
+}
+
+// Reporte les nœuds et liens calculés (les mêmes qu'en 2D) dans la scène 3D
+function sync3D() {
+  if (!G) return
+  for (const n of nodes.values()) {
+    let o = n3.get(n.id)
+    if (!o) {
+      const link = links.find(l => l.s === n.id)
+      const parent = link && n3.get(link.t)
+      o = { id: n.id }
+      if (parent && parent.x !== undefined) {
+        o.x = parent.x + (Math.random() - 0.5) * 30
+        o.y = parent.y + (Math.random() - 0.5) * 30
+        o.z = parent.z + (Math.random() - 0.5) * 30
+      }
+      n3.set(n.id, o)
+    }
+    o.kind = n.kind
+    o.ref = n.ref
+    o.color = n.color
+    o.label = n.label
+    const degree = neighbors.get(n.id)?.size || 0
+    o.val = n.kind === 'agent' ? (n.id === 'ag:' + MAIN ? 14 : 6) + Math.min(20, degree * 0.5) : 1
+  }
+  for (const id of [...n3.keys()]) if (!nodes.has(id)) n3.delete(id)
+  const sig = [...n3.keys()].join('|') + '#' + links.length
+  if (hover3 && !n3.has(hover3.id)) hover3 = null
+  if (sig !== sig3) {
+    sig3 = sig
+    litIds = hover3 ? new Set([hover3.id, ...(neighbors.get(hover3.id) || [])]) : null
+    G.graphData({ nodes: [...n3.values()], links: links.map(l => ({ source: l.s, target: l.t, kind: l.kind })) })
+  } else {
+    restyle3D()
+  }
+  // Premier affichage : on cadre une fois que le graphe s'est un peu déployé
+  if (!fitted3D && n3.size) {
+    fitted3D = true
+    setTimeout(() => G && G.zoomToFit(800, 60), 1500)
+  }
+}
+
+async function setMode(next) {
+  mode = next
+  cfg.mode = next
+  saveCfg()
+  document.getElementById('m2d').classList.toggle('on', next === '2d')
+  document.getElementById('m3d').classList.toggle('on', next === '3d')
+  document.getElementById('help').textContent = next === '3d' ? HELP_3D : HELP_2D
+  if (next === '2d') {
+    if (G) G.pauseAnimation()
+    canvas.style.display = ''
+    g3dEl.style.display = 'none'
+    ov.style.display = 'none'
+    return
+  }
+  canvas.style.display = 'none'
+  g3dEl.style.display = 'block'
+  ov.style.display = 'block'
+  try {
+    if (!G) statusText.textContent = 'Chargement de la 3D…'
+    await ensure3D()
+    if (mode !== '3d') return
+    statusText.textContent = connected ? 'En direct' : 'Reconnexion…'
+    G.resumeAnimation()
+    sync3D()
+  } catch (err) {
+    console.error(err)
+    statusText.textContent = 'Impossible de charger la 3D (Internet ?) : retour en 2D'
+    setMode('2d')
+  }
+}
+
+window.onResize3D = () => {
+  ov.width = canvas.width
+  ov.height = canvas.height
+  if (G) G.width(W).height(H)
+}
+
+// ---------- Réglages : branchement des contrôles ----------
+function bindControls() {
+  for (const key of ['center', 'repel', 'link', 'dist', 'size', 'thick']) {
+    const input = document.getElementById(key), out = document.getElementById('o-' + key)
+    input.value = cfg[key]; out.textContent = cfg[key]
+    input.oninput = () => {
+      cfg[key] = Number(input.value); out.textContent = input.value; saveCfg()
+      alpha = Math.max(alpha, 0.5)
+      apply3DForces()
+    }
+  }
+  for (const key of ['showActions', 'hideDone', 'allLabels']) {
+    const input = document.getElementById(key)
+    input.checked = cfg[key]
+    input.onchange = () => {
+      cfg[key] = input.checked; saveCfg(); rebuild()
+      if (key === 'allLabels' && G) G.nodeThreeObject(G.nodeThreeObject())
+    }
+  }
+  for (const key of ['autoRotate', 'bloom']) {
+    const input = document.getElementById(key)
+    input.checked = cfg[key]
+    input.onchange = () => { cfg[key] = input.checked; saveCfg(); apply3DLook() }
+  }
+  document.getElementById('m2d').onclick = () => setMode('2d')
+  document.getElementById('m3d').onclick = () => setMode('3d')
+  document.getElementById('fit').onclick = () => fit()
+  document.getElementById('closeAll').onclick = closeAllBubbles
+  document.getElementById('reset').onclick = () => {
+    const hidden = cfg.hiddenCats
+    cfg = { ...DEFAULTS, hiddenCats: hidden, mode }; saveCfg(); bindControls(); rebuild(); alpha = 1; apply3DForces(); apply3DLook()
+  }
+}
+bindControls()
+
+// ---------- Flux en direct ----------
+let first = true
+let connected = false
+const statusEl = document.getElementById('status'), statusText = document.getElementById('status-text')
+function connect() {
+  const es = new EventSource('/events')
+  es.onopen = () => { connected = true; statusEl.classList.add('ok'); statusText.textContent = 'En direct' }
+  es.onmessage = ev => {
+    try { raw = JSON.parse(ev.data) } catch { return }
+    receivedAt = Date.now()
+    rebuild()
+    if (first && nodes.size) {
+      first = false
+      for (let i = 0; i < 160; i++) tick()   // laisse le graphe se poser avant de le cadrer
+      fit2D(false)
+    }
+  }
+  es.onerror = () => { connected = false; statusEl.classList.remove('ok'); statusText.textContent = 'Reconnexion…' }
+}
+connect()
+requestAnimationFrame(loop)
+setMode(mode)
+</script>
+</body>
+</html>
