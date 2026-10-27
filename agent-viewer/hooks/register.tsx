@@ -1,8 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { Hook, Register } from 'claude-code'
 
-import type { ActionRow, AgentRow, AgentState, Snapshot } from '../types'
-import { formatDuration, renderGraph, shortTool } from './graph'
+import type { ActionRow, AgentRow, AgentState, ChatMessage, EngineStatus, FinalInfo, RequestInfo, TaskItem, TaskStatus } from '../types'
 
 type Engine = Parameters<Hook<'tool.call'>>[0]
 
@@ -12,12 +11,24 @@ const MAIN = 'main'
 
 const agents = atom({ plugin: 'agent-viewer', key: 'agents' } as const, [])
 const actions = atom({ plugin: 'agent-viewer', key: 'actions' } as const, [])
-const isHidingDone = atom({ plugin: 'agent-viewer', key: 'isHidingDone' } as const, false)
-const frozen = atom({ plugin: 'agent-viewer', key: 'frozen' } as const, null)
-const zoom = atom({ plugin: 'agent-viewer', key: 'zoom' } as const, 1)
 const liveUrl = atom({ plugin: 'agent-viewer', key: 'liveUrl' } as const, null)
 const liveError = atom({ plugin: 'agent-viewer', key: 'liveError' } as const, null)
 const sessionTitle = atom({ plugin: 'agent-viewer', key: 'sessionTitle' } as const, null)
+const request = atom({ plugin: 'agent-viewer', key: 'request' } as const, null)
+const final = atom({ plugin: 'agent-viewer', key: 'final' } as const, null)
+const chat = atom({ plugin: 'agent-viewer', key: 'chat' } as const, [])
+let isPolling = false
+
+// Consigne ajoutée à chaque sous-agent : tenir une liste de tâches, pour que ses % soient réels
+const PROGRESS_TOOL = 'mcp__agent-viewer__progress'
+const TASK_HINT =
+  '\n\n(Progress tracking: before anything else, call the tool `mcp__agent-viewer__progress` with your plan as a short task list ' +
+  '(2 to 6 tasks, status pending / in_progress / completed). Call it again each time a task starts or ends, ' +
+  'and once more right before your final answer, with every finished task marked completed. ' +
+  'The user follows your progress through it. If that tool is missing, use TodoWrite the same way.)'
+const TASK_STATUSES: readonly TaskStatus[] = ['pending', 'in_progress', 'completed']
+const asStatus = (v: unknown): TaskStatus => (TASK_STATUSES.includes(v as TaskStatus) ? (v as TaskStatus) : 'pending')
+const ENGINE_STATUSES: readonly EngineStatus[] = ['pending', 'running', 'waiting', 'idle', 'completed', 'failed', 'killed']
 
 // Vue interactive : un hub local (server/server.mjs), partagé par toutes les sessions qui ont le mod,
 // reçoit l'état de chaque session et le pousse à la page web
@@ -28,30 +39,38 @@ let isEnsuring = false
 let lastPushAt = 0
 let lastEnsureAt = 0
 
-// Taille d'une cellule de police du panneau desktop, en pixels (estimation)
-const CELL_W = 7.6
-const CELL_H = 18
-const ZOOM_STEPS = [0.6, 0.7, 0.8, 0.9, 1, 1.15, 1.3, 1.5, 1.75, 2]
-const stepZoom = (z: number, dir: 1 | -1) => {
-  const i = ZOOM_STEPS.findIndex(s => s >= z - 0.001)
-  const at = i === -1 ? ZOOM_STEPS.length - 1 : i
-
-  return ZOOM_STEPS[Math.min(ZOOM_STEPS.length - 1, Math.max(0, at + dir))] ?? 1
+// Couleur et libellé de chaque état dans le résumé du panneau (les mêmes que la vue complète)
+type Shown = 'run' | 'done' | 'wait' | 'fail' | 'stopped' | 'alert'
+const SHOWN: Record<Shown, { color: string; label: string; mark: string }> = {
+  run: { color: 'text', label: 'en cours', mark: '●' },
+  done: { color: '#86d982', label: 'terminé', mark: '✓' },
+  wait: { color: '#a98cf5', label: 'en attente', mark: '◌' },
+  fail: { color: '#ef5f5f', label: 'échec', mark: '✗' },
+  stopped: { color: '#ef5f5f', label: 'arrêté', mark: '■' },
+  alert: { color: '#ff8a3d', label: 'alerte', mark: '!' },
 }
-
-const ICON: Record<AgentState, string> = { running: '●', done: '✓', failed: '✗', stopped: '■' }
-const COLOR: Record<AgentState, string> = {
-  running: 'warning',
-  done: 'success',
-  failed: 'error',
-  stopped: 'inactive',
+const shownOf = (a: AgentRow): Shown =>
+  a.alert ? 'alert'
+  : a.state === 'failed' || a.status === 'failed' ? 'fail'
+  : a.state === 'stopped' || a.status === 'killed' ? 'stopped'
+  : a.status === 'pending' || a.status === 'waiting' || a.status === 'idle' ? 'wait'
+  : a.state === 'running' || a.status === 'running' ? 'run'
+  : 'done'
+// % d'un agent : tâches faites ÷ total ; rien si pas de liste, ou liste jamais mise à jour
+const pctOf = (a: AgentRow): number | null => {
+  const tasks = a.tasks ?? []
+  if (!tasks.length) return null
+  const done = tasks.filter(t => t.status === 'completed').length
+  const sh = shownOf(a)
+  if ((sh === 'done' || sh === 'fail' || sh === 'stopped') && (a.taskUpdates ?? 0) <= 1 && done < tasks.length) return null
+  return Math.round((done / tasks.length) * 100)
 }
-const LABEL: Record<AgentState, string> = {
-  running: 'en cours',
-  done: 'terminé',
-  failed: 'échec',
-  stopped: 'arrêté',
+const segBar = (p: number | null, width = 20) => {
+  if (p === null) return '·'.repeat(width)
+  const full = Math.round((p / 100) * width)
+  return '▮'.repeat(full) + '▯'.repeat(width - full)
 }
+const shortTool = (tool: string) => (tool.startsWith('mcp__') ? (tool.split('__').pop() ?? tool) : tool)
 
 // Les arguments les plus parlants pour résumer un appel d'outil
 const ARG_KEYS = ['description', 'command', 'file_path', 'pattern', 'query', 'url', 'path', 'skill', 'prompt']
@@ -88,6 +107,75 @@ async function patch($: Engine, id: string, fn: (row: AgentRow) => AgentRow) {
     return base.map(row => (row.id === id ? fn(row) : row))
   })
   isDirty = true
+}
+
+// Met à jour la liste de tâches d'un agent
+async function setTasks($: Engine, id: string, fn: (tasks: TaskItem[]) => TaskItem[]) {
+  await patch($, id, row => ({ ...row, tasks: fn(row.tasks ?? []).slice(0, 40), taskUpdates: (row.taskUpdates ?? 0) + 1 }))
+}
+
+// Lit un appel d'outil de liste de tâches et l'applique à la liste de l'agent
+async function trackTasks($: Engine, id: string, tool: string, args: Record<string, unknown>) {
+  const list = tool === 'TodoWrite' ? args.todos : tool === PROGRESS_TOOL ? args.tasks : undefined
+  if (Array.isArray(list)) {
+    const todos = list as Array<Record<string, unknown>>
+    await setTasks($, id, () => todos.map(t => ({ content: clip(String(t.content ?? ''), 120), status: asStatus(t.status) })))
+    return
+  }
+  // Le plan de l'app desktop (update_plan) : une liste entière, ou « avancer / fait / commencer »
+  if (/update_plan$/.test(tool)) {
+    if (Array.isArray(args.items)) {
+      const items = args.items as Array<Record<string, unknown>>
+      await setTasks($, id, () => items.map(t => ({ content: clip(String(t.content ?? ''), 120), status: asStatus(t.status) })))
+      return
+    }
+    await setTasks($, id, list => {
+      const next = list.map(t => ({ ...t }))
+      if (args.advance) {
+        const cur = next.findIndex(t => t.status === 'in_progress')
+        if (cur >= 0) next[cur]!.status = 'completed'
+        const nxt = next.findIndex((t, i) => i > cur && t.status === 'pending')
+        if (nxt >= 0) next[nxt]!.status = 'in_progress'
+      }
+      if (Array.isArray(args.done)) for (const n of args.done as number[]) if (next[n - 1]) next[n - 1]!.status = 'completed'
+      if (typeof args.start === 'number' && next[args.start - 1]) next[args.start - 1]!.status = 'in_progress'
+      return next
+    })
+    return
+  }
+  if (tool === 'TaskUpdate' && typeof args.taskId === 'string') {
+    const taskId = args.taskId
+    await setTasks($, id, list =>
+      args.status === 'deleted'
+        ? list.filter(t => t.id !== taskId)
+        : list.map(t =>
+            t.id === taskId
+              ? { ...t, status: args.status ? asStatus(args.status) : t.status, content: typeof args.subject === 'string' ? clip(args.subject, 120) : t.content }
+              : t,
+          ),
+    )
+  }
+}
+
+// Recopie le statut de chaque boucle d'agent donné par Claude Code (en attente, terminé, échec…)
+async function syncStatuses($: Engine) {
+  let list: Awaited<ReturnType<Engine['agent']['list']>>
+  try {
+    list = await $.agent.list()
+  } catch {
+    return
+  }
+  const byId = new Map(list.map(a => [a.id, a.status]))
+  let changed = false
+  await update($, agents, rows =>
+    rows.map(row => {
+      const st = byId.get(row.id)
+      if (!st || st === row.status || !ENGINE_STATUSES.includes(st)) return row
+      changed = true
+      return { ...row, status: st }
+    }),
+  )
+  if (changed) isDirty = true
 }
 
 // Trouve le hub qui tourne déjà (lancé par une autre session) ou en démarre un, puis note son adresse
@@ -129,7 +217,7 @@ async function push($: Engine) {
   lastPushAt = now
   try {
     const session = { id: await $.session.id(), cwd: await $.session.cwd(), title: (await read($, sessionTitle)) ?? '' }
-    const body = JSON.stringify({ session, agents: await read($, agents), actions: await read($, actions), now })
+    const body = JSON.stringify({ session, agents: await read($, agents), actions: await read($, actions), request: await read($, request), final: await read($, final), chat: (await read($, chat)).slice(-200), now })
     const res = await $.http.fetch(`http://127.0.0.1:${hub.port}/state`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-agent-viewer': '1' },
@@ -145,16 +233,53 @@ async function push($: Engine) {
   }
 }
 
-// Fige ou relance le graphe
-async function toggleFreeze($: Engine) {
-  const current = await read($, frozen)
-  if (current) {
-    await update($, frozen, () => null)
+// Ajoute un message au chat (gardé dans l'état de la session)
+async function addChat($: Engine, msg: ChatMessage) {
+  await update($, chat, list => [...list, msg].slice(-200))
+  isDirty = true
+}
 
-    return
+// Relève les messages écrits dans la page et les remet à leur agent
+async function pollInbox($: Engine) {
+  if (!hub || isPolling) return
+  isPolling = true
+  try {
+    const sessionId = await $.session.id()
+    const res = await $.http.fetch(`http://127.0.0.1:${hub.port}/inbox?session=${encodeURIComponent(sessionId)}`, {
+      headers: { 'x-agent-viewer': '1' },
+    })
+    if (!res.ok) return
+    const list = JSON.parse(res.text) as Array<{ id: string; agentId: string; text: string }>
+    for (const m of list) {
+      if (typeof m.text !== 'string' || typeof m.agentId !== 'string') continue
+      const text = m.text.slice(0, 4000)
+      const now = await $.clock.now()
+      // Tout passe par l'agent principal, comme un message de l'utilisateur dans la session :
+      // - pour lui, le texte tel quel ;
+      // - pour un sous-agent, une demande de transmission : l'agent principal envoie lui-même le message
+      //   avec SendMessage, sous les règles d'autorisation habituelles (le mod n'en contourne aucune).
+      let prompt = text
+      if (m.agentId !== MAIN) {
+        const target = (await read($, agents)).find(row => row.id === m.agentId)
+        const name = target ? `« ${target.description} » (${target.type}, id ${m.agentId})` : `d'id ${m.agentId}`
+        prompt =
+          `[Chat agent-viewer] Transmets ce message, mot pour mot, au sous-agent ${name} avec SendMessage ` +
+          `(to: "${m.agentId}"), puis continue sans rien faire d'autre :\n\n${text}`
+      }
+      await addChat($, { id: m.id, agentId: m.agentId, from: 'user', text, at: now, status: 'queued' })
+      try {
+        await $.prompt.submit({ text: prompt, asUser: true })
+        await update($, chat, l => l.map(c => (c.id === m.id ? { ...c, status: 'sent' as const } : c)))
+      } catch (err) {
+        await update($, chat, l => l.map(c => (c.id === m.id ? { ...c, status: 'failed' as const, reason: String(err) } : c)))
+      }
+      isDirty = true
+    }
+  } catch {
+    // hub momentanément absent : on réessaiera
+  } finally {
+    isPolling = false
   }
-  const snapshot: Snapshot = { agents: await read($, agents), actions: await read($, actions), at: await $.clock.now() }
-  await update($, frozen, () => snapshot)
 }
 
 export const register: Register = on => {
@@ -168,10 +293,34 @@ export const register: Register = on => {
       description: "Donne l'adresse de la vue interactive des agents (zoom, déplacement, bulles)",
     })
     void $.ui.open({ id: PANE, title: TITLE })
+    // L'outil que les agents appellent pour annoncer leur liste de tâches (leurs % viennent de là)
+    await $.tool.register({
+      name: 'progress',
+      description:
+        'Report your task list so the user can follow your progress. Call it first with your plan, then each time a task starts or ends. ' +
+        'Send the whole list every time.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          tasks: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: { content: { type: 'string' }, status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] } },
+              required: ['content', 'status'],
+            },
+          },
+        },
+        required: ['tasks'],
+      },
+      isDeferred: false,
+    })
 
     // Vue interactive : hub partagé + envoi de l'état de cette session à chaque changement
     void ensureHub($)
     $.clock.every(250, () => void push($))
+    $.clock.every(1500, () => void syncStatuses($))
+    $.clock.every(1000, () => void pollInbox($))
 
     return next(e)
   })
@@ -215,18 +364,34 @@ export const register: Register = on => {
   on('prompt.submit', async ($, e, next) => {
     const now = await $.clock.now()
     // Le premier message sert de nom à la session dans la vue de toutes les sessions
-    const text = e.text.replace(/\s+/g, ' ').trim()
+    // Seul un message tapé par la personne compte comme « Demande » (pas un rapport de sous-agent,
+    // une notification de tâche, ni un relais du chat agent-viewer)
+    const typed = !e.isMeta && (e.origin.kind === 'composer' || e.origin.kind === 'bridge')
+    const raw = e.text.replace(/\s+/g, ' ').trim()
+    const text = typed && !raw.startsWith('[Chat agent-viewer]') ? raw : ''
     if (text && !text.startsWith('/') && !(await read($, sessionTitle))) {
       await update($, sessionTitle, () => clip(text, 70))
     }
     await patch($, MAIN, row => ({ ...row, state: 'running', startedAt: now, endedAt: undefined }))
+    if (text && !text.startsWith('/')) {
+      const req: RequestInfo = { text: clip(text, 300), at: now }
+      const fin: FinalInfo = { state: 'waiting', at: now }
+      await update($, request, () => req)
+      await update($, final, () => fin)
+    }
 
     return next(e)
   })
 
   // Un sous-agent est lancé : on l'ajoute avec sa tâche
   on('agent.spawn', async ($, e, next) => {
-    const result = await next(e)
+    // Partie du projet : l'étape du plan de l'agent principal en cours à ce moment
+    const mainTasks = (await read($, agents)).find(row => row.id === MAIN)?.tasks ?? []
+    const step = mainTasks.findIndex(t => t.status === 'in_progress')
+    const part = step >= 0 ? `Étape ${step + 1} · ${mainTasks[step]!.content}` : undefined
+    // Demande au sous-agent de tenir une liste de tâches (pas pour une reprise, un fork ou un workflow)
+    const canHint = !e.resume && !e.fork && !e.workflow && !e.prompt.includes('Progress tracking:')
+    const result = await next(canHint ? { ...e, prompt: e.prompt + TASK_HINT } : e)
     if (!result.agentId || e.resume) {
       if (e.resume) await patch($, e.resume.agentId, row => ({ ...row, state: 'running', endedAt: undefined }))
 
@@ -245,6 +410,9 @@ export const register: Register = on => {
       startedAt: now,
       toolCount: 0,
       recentTools: [],
+      part,
+      prompt: clip(e.prompt.replace(/\s+/g, ' ').trim(), 400),
+      status: 'running',
     }
     await update($, agents, list => [...list.filter(one => one.id !== row.id), row].slice(-60))
     isDirty = true
@@ -266,12 +434,21 @@ export const register: Register = on => {
       currentTool: label,
       currentToolId: e.tool_use_id,
       currentToolName: e.tool,
+      ...(e.tool === 'AskUserQuestion' ? { alert: 'Te pose une question', alertToolId: e.tool_use_id } : {}),
     }))
+    const args = e as unknown as Record<string, unknown>
+    await trackTasks($, id, e.tool, args)
 
     let isError = false
     try {
       const ran = await next(e)
       isError = !!(ran.deny || ran.isError)
+      // TaskCreate : l'identifiant de la tâche n'existe qu'après l'appel
+      if (e.tool === 'TaskCreate' && !isError) {
+        const created = (ran.result as { task?: { id?: string; subject?: string } } | undefined)?.task
+        const subject = typeof args.subject === 'string' ? args.subject : created?.subject ?? ''
+        await setTasks($, id, list => [...list, { id: created?.id, content: clip(subject, 120), status: 'pending' }])
+      }
 
       return ran
     } catch (err) {
@@ -289,9 +466,24 @@ export const register: Register = on => {
           currentToolId: isMine ? undefined : row.currentToolId,
           currentToolName: isMine ? undefined : row.currentToolName,
           recentTools: [...row.recentTools, label].slice(-3),
+          alert: row.alertToolId === e.tool_use_id ? undefined : row.alert,
+          alertToolId: row.alertToolId === e.tool_use_id ? undefined : row.alertToolId,
         }
       })
     }
+  })
+
+  on('tool.call', { tool: PROGRESS_TOOL }, async () => ({ result: 'Progress recorded.' }))
+
+  // La fenêtre d'autorisation est vraiment montrée : alerte pour l'utilisateur jusqu'à la fin de l'appel
+  on('classic.PermissionRequest', async ($, e, next) => {
+    await patch($, e.agent_id ?? MAIN, row => ({
+      ...row,
+      alert: `Attend ton autorisation : ${shortTool(e.tool_name)}`,
+      alertToolId: row.currentToolId,
+    }))
+
+    return next(e)
   })
 
   // Fin d'un tour : le sous-agent (ou le principal) a fini
@@ -305,162 +497,75 @@ export const register: Register = on => {
       currentTool: undefined,
       currentToolId: undefined,
       currentToolName: undefined,
+      alert: undefined,
+      alertToolId: undefined,
     }))
+    const answer = e.answer.trim()
+    if (answer) await addChat($, { id: e.turnId, agentId: e.agentId ?? MAIN, from: 'agent', text: clip(answer, 3000), at: now })
+    if (!e.agentId) {
+      const fin: FinalInfo = { state: state === 'done' ? 'ready' : state, text: clip(e.answer.replace(/\s+/g, ' ').trim(), 300), at: now }
+      await update($, final, () => fin)
+    }
 
     return next(e)
   })
 
+  // Panneau du chat : un résumé simple ; la vue complète (organigramme, chat) est la page du hub
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const ui = $.ui.resolve(e)
-    const { Box, Text, Button } = ui
-    const hideDone = await read($, isHidingDone)
-    const snapshot = await read($, frozen)
-    // Figé : on ne lit pas l'état en direct, donc le dessin ne bouge plus
-    const list = snapshot ? snapshot.agents : await read($, agents)
-    const acts = snapshot ? snapshot.actions : await read($, actions)
-    const now = snapshot ? snapshot.at : await $.clock.now()
-
-    const subs = list.filter(row => row.id !== MAIN)
-    const running = subs.filter(row => row.state === 'running').length
+    const { Box, Text, Button } = $.ui.resolve(e)
+    const list = await read($, agents)
     const url = await read($, liveUrl)
     const urlError = await read($, liveError)
+    const main = list.find(row => row.id === MAIN)
+    const subs = list.filter(row => row.id !== MAIN)
+    const steps = main?.tasks ?? []
+    const stepsDone = steps.filter(t => t.status === 'completed').length
+    const projectPct = steps.length ? Math.round((stepsDone / steps.length) * 100) : null
+    const running = subs.filter(row => ['run', 'alert'].includes(shownOf(row))).length
 
-    const liveRow = url ? (
-      <Box flexDirection="row" gap={1} flexWrap="wrap">
-        <Text color="success">●</Text>
-        <Text dimColor>Vue interactive, toutes les sessions :</Text>
-        <Text weight="semibold">{url}</Text>
-      </Box>
-    ) : (
-      <Box flexDirection="row" gap={1} flexWrap="wrap" alignItems="center">
-        <Text color={urlError ? 'error' : 'warning'}>●</Text>
-        <Text dimColor>{urlError ? `Vue interactive arrêtée : ${clip(urlError, 120)}` : 'Vue interactive : démarrage…'}</Text>
-        {urlError && <Button key="restart" label="Relancer" onPress={() => ensureHub($)} />}
-      </Box>
-    )
-
-    const toolbar = (
-      <Box flexDirection="row" justifyContent="space-between" alignItems="center">
-        <Text dimColor>
-          {snapshot ? 'Figé · ' : ''}
-          {running} actif{running > 1 ? 's' : ''} · {subs.length} sous-agent{subs.length > 1 ? 's' : ''}
-        </Text>
-        <Box flexDirection="row" gap={1}>
-          <Button
-            key="freeze"
-            label={snapshot ? 'Reprendre le direct' : 'Figer'}
-            variant={snapshot ? 'primary' : 'secondary'}
-            onPress={() => toggleFreeze($)}
-          />
-          <Button
-            key="toggle"
-            label={hideDone ? 'Tout afficher' : 'Masquer terminés'}
-            onPress={() => update($, isHidingDone, v => !v)}
-          />
-          <Button
-            key="clear"
-            label="Effacer"
-            onPress={async () => {
-              const kept = (await read($, agents)).filter(row => row.state === 'running' || row.id === MAIN)
-              const ids = new Set(kept.filter(row => row.id !== MAIN).map(row => row.id))
-              await update($, agents, () => kept)
-              await update($, actions, l => l.filter(a => ids.has(a.agentId) || a.endedAt === undefined))
-              await update($, frozen, () => null)
-              isDirty = true
-            }}
-          />
-        </Box>
-      </Box>
-    )
-
-    // Desktop (et toute surface qui sait dessiner du SVG) : le graphe de nœuds
-    if ('Svg' in ui) {
-      const { Svg } = ui
-      const z = await read($, zoom)
-      // Le cadre interactif n'a pas de taille par lui-même : on la calcule depuis les cellules du panneau
-      const cols = e.props.bodyColumns || 80
-      const rows = Math.max(12, (e.props.scroll?.bodyRows || 40) - 4)
-      const pixelWidth = Math.round(Math.max(320, cols * CELL_W - 8) * z)
-      const pixelHeight = Math.round(Math.min(2400, Math.max(260, rows * CELL_H)) * z)
-      // Unités du dessin un peu plus grandes que les pixels, pour garder des textes lisibles
-      const width = Math.round(Math.min(1400, Math.max(700, pixelWidth * 1.3)))
-      const height = Math.round(width * (pixelHeight / pixelWidth))
-      const source = renderGraph({ agents: list, actions: acts, now, width, height, pixelWidth, pixelHeight, hideDone })
+    const line = (row: AgentRow, name: string) => {
+      const sh = SHOWN[shownOf(row)]
+      const p = pctOf(row)
+      const now = row.alert ?? (shownOf(row) === 'run' ? row.currentTool : undefined)
 
       return (
-        <Box flexDirection="column" gap={1}>
-          {toolbar}
-          {liveRow}
-          <Box flexDirection="row" gap={1} alignItems="center">
-            <Text dimColor>Taille</Text>
-            <Button key="zoom-out" label="−" onPress={() => update($, zoom, v => stepZoom(v, -1))} />
-            <Text dimColor>{Math.round(z * 100)} %</Text>
-            <Button key="zoom-in" label="+" onPress={() => update($, zoom, v => stepZoom(v, 1))} />
-          </Box>
-          <Svg
-            source={source}
-            isInteractive
-            width={pixelWidth}
-            height={pixelHeight}
-            alt={`Graphe des agents : ${running} actifs, ${subs.length} sous-agents, ${acts.length} actions`}
-          />
+        <Box key={`a-${row.id}`} flexDirection="column">
+          <Text>
+            <Text color={sh.color}>{sh.mark} </Text>
+            <Text weight="semibold">{name}</Text>
+            <Text dimColor> · {sh.label} · {p === null ? '—' : `${p} %`}</Text>
+          </Text>
+          {now && <Text color={row.alert ? SHOWN.alert.color : undefined} dimColor={!row.alert}>   → {clip(now, 80)}</Text>}
         </Box>
       )
     }
 
-    // Terminal : la liste en arbre
-    const ordered: { row: AgentRow; depth: number }[] = []
-    const ids = new Set(list.map(row => row.id))
-    const walk = (parentId: string | undefined, depth: number) => {
-      for (const row of list) {
-        const parent = row.id === MAIN ? undefined : row.parentId && ids.has(row.parentId) ? row.parentId : MAIN
-        if (parent !== parentId || (row.id !== MAIN && parentId === undefined)) continue
-        ordered.push({ row, depth })
-        if (depth < 6) walk(row.id, depth + 1)
-      }
-    }
-    walk(undefined, 0)
-    for (const row of list) if (!ordered.some(o => o.row.id === row.id)) ordered.push({ row, depth: 0 })
-    const shown = ordered.filter(({ row }) => !hideDone || row.state === 'running' || row.id === MAIN)
-
     return (
       <Box flexDirection="column" gap={1}>
-        {toolbar}
-        {liveRow}
-        {subs.length === 0 && (
-          <Text dimColor>Aucun sous-agent pour l'instant. Ils apparaîtront ici dès leur lancement.</Text>
+        {url ? (
+          <Text>
+            <Text color="success">● </Text>
+            <Text dimColor>Vue complète (organigramme, chat) : </Text>
+            <Text weight="semibold">{url}</Text>
+          </Text>
+        ) : (
+          <Box flexDirection="row" gap={1} alignItems="center" flexWrap="wrap">
+            <Text color={urlError ? 'error' : 'warning'}>●</Text>
+            <Text dimColor>{urlError ? `Vue complète arrêtée : ${clip(urlError, 120)}` : 'Vue complète : démarrage…'}</Text>
+            {urlError && <Button key="restart" label="Relancer" onPress={() => ensureHub($)} />}
+          </Box>
         )}
-        {shown.map(({ row, depth }) => {
-          const elapsed = formatDuration((row.endedAt ?? now) - row.startedAt)
-          const indent = '  '.repeat(depth) + (depth > 0 ? '└ ' : '')
-
-          return (
-            <Box key={`agent-${row.id}`} flexDirection="column">
-              <Text>
-                <Text dimColor>{indent}</Text>
-                <Text color={COLOR[row.state]}>{ICON[row.state]} </Text>
-                <Text weight="semibold">{row.description}</Text>
-              </Text>
-              <Text dimColor>
-                {'  '.repeat(depth + 1)}
-                {row.type}
-                {row.model ? ` · ${row.model}` : ''}
-                {row.isBackground ? ' · arrière-plan' : ''} · {LABEL[row.state]} · {elapsed} · {row.toolCount} outil
-                {row.toolCount > 1 ? 's' : ''}
-              </Text>
-              {row.currentTool && (
-                <Text color="claude">
-                  {'  '.repeat(depth + 1)}→ {row.currentTool}
-                </Text>
-              )}
-              {!row.currentTool && row.state === 'running' && row.recentTools.length > 0 && (
-                <Text dimColor>
-                  {'  '.repeat(depth + 1)}dernier : {row.recentTools[row.recentTools.length - 1]}
-                </Text>
-              )}
-            </Box>
-          )
-        })}
+        <Text>
+          <Text dimColor>PROJET </Text>
+          <Text color="success">{segBar(projectPct)}</Text>
+          <Text> {projectPct === null ? '—' : `${projectPct} %`}</Text>
+          <Text dimColor> · {running} agent{running > 1 ? 's' : ''} actif{running > 1 ? 's' : ''} · {subs.length} sous-agent{subs.length > 1 ? 's' : ''}</Text>
+        </Text>
+        <Box flexDirection="column">
+          {main ? line(main, 'Agent principal') : <Text dimColor>Agent principal : pas encore de tour.</Text>}
+          {subs.slice(-12).map(row => line(row, row.description))}
+          {subs.length > 12 && <Text dimColor>… et {subs.length - 12} autres dans la vue complète.</Text>}
+        </Box>
       </Box>
     )
   })

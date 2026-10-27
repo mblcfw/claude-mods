@@ -3,1153 +3,498 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Graphe des agents</title>
-<!-- Bibliothèques 3D : versions figées, vérifiées par empreinte, chargées seulement en mode 3D -->
-<script type="importmap">
-{
-  "imports": {
-    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
-    "three-spritetext": "https://cdn.jsdelivr.net/npm/three-spritetext@1.9.0/dist/three-spritetext.mjs"
-  },
-  "integrity": {
-    "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js": "sha384-GY5FqjttLCFRt/McQbyaVdCk2O1IQtOeX8Py6NfD89BIAsIyJFRl4UgSXrk2vXAk",
-    "https://cdn.jsdelivr.net/npm/three-spritetext@1.9.0/dist/three-spritetext.mjs": "sha384-PfD+NOEYTHyMAXhy8KErJAKKKfGQvzqold9pcLUfEUAOwvIwb1WnA0CB5TWOt7OP"
-  }
-}
-</script>
+<title>Agents</title>
 <style>
-  :root {
-    --bg: #0b0d12;
-    --panel: rgba(21, 25, 35, 0.92);
-    --border: #262c3a;
-    --text: #e6e8ee;
-    --muted: #8b93a3;
-    --faint: #5b6475;
-    --accent: #a970ff;
-  }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
-    font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  #c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
-  #c.panning { cursor: grabbing; }
-  #c.on-node { cursor: pointer; }
-  #c.dragging { cursor: grabbing; }
-  #g3d { position: fixed; inset: 0; display: none; }
-  #ov { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; display: none; z-index: 5; }
-  .seg { display: flex; background: #0f1218; border: 1px solid var(--border); border-radius: 7px; padding: 2px; gap: 2px; }
-  .seg button { flex: 1; background: none; border: none; color: var(--muted); font: inherit; font-weight: 600; padding: 4px 0;
-    border-radius: 5px; cursor: pointer; }
-  .seg button.on { background: #2a3142; color: var(--text); }
-  .seg button:hover:not(.on) { color: var(--text); }
-  .float-tooltip-kap, .scene-tooltip { font: 12px/1.4 system-ui, sans-serif !important; background: rgba(21,25,35,.94) !important;
-    border: 1px solid #262c3a; border-radius: 7px !important; padding: 5px 9px !important; color: #e6e8ee !important; }
+  :root { --bg:#0c0d0c; --stagebg:#111311; --panel:#151815; --card:#181b18; --line:#262b26; --line2:#3a413a;
+    --soft:#1c241c; --text:#e2e5df; --muted:#878e86; --idle:#4f564f; --track:#232823; --userbg:#1c241c; --inbg:#0f110f;
+    --accent:#86d982;
+    --s-run:#d8d2bc; --s-done:#86d982; --s-wait:#a98cf5; --s-fail:#ef5f5f; --s-alert:#ff8a3d;
+    --f-ui:'Bahnschrift','DIN Alternate','DIN Condensed','Barlow Semi Condensed','Arial Narrow',sans-serif;
+    --f-num:'Cascadia Mono','SF Mono',Consolas,ui-monospace,monospace; }
+  :root.light { --bg:#e6e5dd; --stagebg:#efeee7; --panel:#f6f5ef; --card:#fbfaf5; --line:#d3d1c5; --line2:#b9b6a6;
+    --soft:#e3ead9; --text:#1d1f1b; --muted:#6c6e64; --idle:#a3a294; --track:#dcdbd1; --userbg:#e3ead9; --inbg:#fbfaf5;
+    --accent:#3f7b3b;
+    --s-run:#4b4a40; --s-done:#3f7b3b; --s-wait:#6a4fc2; --s-fail:#b33434; --s-alert:#c4561e; }
+  * { box-sizing:border-box; }
+  html, body { margin:0; height:100%; }
+  body { background:var(--bg); color:var(--text); font:13px/1.45 var(--f-ui); }
+  .app { display:grid; grid-template-rows:minmax(0,1fr) auto; gap:12px; padding:12px; height:100vh; min-height:480px; }
 
-  .panel { position: fixed; background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
-    backdrop-filter: blur(6px); box-shadow: 0 8px 24px rgba(0,0,0,.35); }
-  #top { top: 12px; left: 12px; padding: 8px; display: flex; flex-direction: column; gap: 6px; width: 250px; }
-  #search { width: 100%; background: #0f1218; border: 1px solid var(--border); color: var(--text); border-radius: 7px;
-    padding: 6px 9px 6px 28px; font: inherit; outline: none; }
-  #search:focus { border-color: var(--accent); }
-  .search-wrap { position: relative; }
-  .search-wrap svg { position: absolute; left: 8px; top: 8px; opacity: .55; }
-  #stats { color: var(--muted); font-size: 12px; padding: 0 2px; }
-  #sessions { display: flex; flex-direction: column; gap: 1px; max-height: 170px; overflow-y: auto; }
-  #sessions:empty { display: none; }
-  .ss { display: flex; align-items: center; gap: 7px; font-size: 12px; color: #c9ced8; padding: 3px 4px; border-radius: 5px;
-    cursor: pointer; user-select: none; }
-  .ss:hover { background: rgba(255,255,255,.05); }
-  .ss i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-  .ss span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
-  .ss em { font-style: normal; color: var(--faint); font-size: 11px; flex: none; }
-  .ss.off { opacity: .4; }
-  .ss.off span { text-decoration: line-through; }
-  #empty { left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 14px 18px; color: var(--muted); text-align: center;
-    display: none; max-width: 340px; }
+  /* Le plan des agents : zoom à la molette, déplacement en glissant le fond */
+  .stage { position:relative; overflow:hidden; border:1px solid var(--line); border-radius:6px; background:var(--stagebg); cursor:grab; touch-action:none; }
+  .stage.panning { cursor:grabbing; }
+  .world { position:absolute; left:0; top:0; width:max-content; transform-origin:0 0; padding:24px; }
+  .hud { position:absolute; top:10px; right:10px; display:flex; gap:6px; z-index:10; }
+  .hud button, .hud span, .topleft select { background:var(--panel); border:1px solid var(--line); color:var(--muted); border-radius:3px; height:28px; padding:0 9px;
+    font:500 11px var(--f-ui); text-transform:uppercase; letter-spacing:.08em; cursor:pointer; display:grid; place-items:center; }
+  .hud span { cursor:default; font-family:var(--f-num); min-width:52px; }
+  .hud button:hover { color:var(--text); border-color:var(--line2); }
+  .topleft { position:absolute; top:10px; left:10px; display:flex; gap:8px; align-items:center; z-index:10; max-width:max(140px, calc(100% - 400px)); }
+  .topleft select { display:block; max-width:100%; text-transform:none; letter-spacing:.02em; font-size:12px; color:var(--text); }
+  .live { width:8px; height:8px; border-radius:1px; flex:none; background:var(--idle); }
+  .live.on { background:var(--s-done); }
+  .legend { position:absolute; left:12px; bottom:10px; display:flex; gap:12px; flex-wrap:wrap; font-size:10.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; z-index:10;
+    background:color-mix(in srgb, var(--stagebg) 85%, transparent); padding:4px 8px; border-radius:3px; }
+  .legend i { display:inline-block; width:8px; height:8px; border-radius:1px; margin-right:5px; background:var(--c); }
+  .empty { position:absolute; inset:0; display:grid; place-items:center; color:var(--muted); text-align:center; padding:20px; white-space:pre-line; }
+  .empty[hidden] { display:none; }
 
-  #settings { top: 12px; right: 12px; width: 250px; }
-  #settings summary { list-style: none; cursor: pointer; padding: 9px 12px; font-weight: 600; display: flex;
-    justify-content: space-between; align-items: center; user-select: none; }
-  #settings summary::-webkit-details-marker { display: none; }
-  #settings summary::after { content: "▸"; color: var(--muted); transition: transform .15s; }
-  #settings[open] summary::after { transform: rotate(90deg); }
-  .settings-body { padding: 4px 12px 12px; display: flex; flex-direction: column; gap: 10px; }
-  .group-title { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; margin-top: 4px; }
-  label.slider { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: #c9ced8; }
-  label.slider span { display: flex; justify-content: space-between; }
-  label.slider output { color: var(--muted); font-variant-numeric: tabular-nums; }
-  input[type=range] { width: 100%; accent-color: var(--accent); }
-  label.toggle { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #c9ced8; cursor: pointer; }
-  label.toggle input { accent-color: var(--accent); }
-  .btn { background: #1d2230; color: var(--text); border: 1px solid var(--border); border-radius: 7px; padding: 6px 10px;
-    font: inherit; cursor: pointer; }
-  .btn:hover { border-color: var(--accent); }
-  .row { display: flex; gap: 6px; }
-  .row .btn { flex: 1; }
+  /* Bulles d'agent : leur couleur suit l'état */
+  .st-run, .card.st-run { --c:var(--s-run); } .st-done, .card.st-done { --c:var(--s-done); } .st-wait, .card.st-wait { --c:var(--s-wait); }
+  .st-fail, .card.st-fail { --c:var(--s-fail); } .st-alert, .card.st-alert { --c:var(--s-alert); }
+  .card { --c:var(--line2); position:relative; background:color-mix(in srgb, var(--c) 5%, var(--card)); border:1px solid color-mix(in srgb, var(--c) 45%, var(--line));
+    border-radius:5px; padding:12px 14px; cursor:grab; transition:transform .25s ease, border-color .15s; user-select:none; }
+  .card:hover { border-color:color-mix(in srgb, var(--c) 75%, var(--line)); }
+  .card.sel { border-color:var(--c); box-shadow:0 0 0 3px color-mix(in srgb, var(--c) 14%, transparent); }
+  .card.dragging { cursor:grabbing; transition:none; z-index:5; box-shadow:0 10px 26px rgba(0,0,0,.45); }
+  .card.open { z-index:3; }
+  .card.st-alert { animation:alert 1.6s ease-in-out infinite; }
+  @keyframes alert { 50% { box-shadow:0 0 0 4px color-mix(in srgb, var(--s-alert) 22%, transparent); } }
+  @property --a { syntax:'<angle>'; inherits:false; initial-value:0deg; }
+  .card.run::before { content:""; position:absolute; inset:-1px; border-radius:6px; padding:1.25px; pointer-events:none;
+    background:conic-gradient(from var(--a), transparent 0 70%, color-mix(in srgb, var(--c) 35%, transparent) 82%, var(--c) 92%, transparent 100%);
+    -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite:xor; mask-composite:exclude;
+    animation:spin 2.23s linear infinite; animation-delay:var(--phase, 0s); }
+  @keyframes spin { to { --a:360deg; } }
+  .card.pop { animation:pop .32s ease-out, ring .6s ease-out; }
+  @keyframes pop { 0% { scale:.96; } 55% { scale:1.025; } 100% { scale:1; } }
+  @keyframes ring { from { box-shadow:0 0 0 0 color-mix(in srgb, var(--c) 55%, transparent); } to { box-shadow:0 0 0 16px transparent; } }
+  .head { display:flex; gap:10px; align-items:center; }
+  .ico { width:32px; height:32px; border-radius:3px; border:1px solid var(--line); background:var(--soft); display:grid; place-items:center; color:var(--c, var(--accent)); flex:none; font-size:15px; }
+  .ttl { font-weight:600; font-size:13px; text-transform:uppercase; letter-spacing:.07em; overflow-wrap:anywhere; }
+  .sub { color:var(--muted); font-size:11.5px; letter-spacing:.03em; overflow-wrap:anywhere; }
+  .now { margin-top:8px; font-size:11.5px; color:var(--c); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .badge { position:absolute; top:-9px; right:10px; font-size:10.5px; padding:1px 7px; border-radius:3px; border:1px solid var(--c); color:var(--c); background:var(--bg); text-transform:uppercase; letter-spacing:.08em; }
+  .bar { display:flex; align-items:center; gap:8px; margin-top:10px; }
+  .bar .t { flex:1; height:6px; background:var(--track); overflow:hidden; -webkit-mask:repeating-linear-gradient(90deg,#000 0 9px,transparent 9px 11px); mask:repeating-linear-gradient(90deg,#000 0 9px,transparent 9px 11px); }
+  .bar .f { height:100%; background:var(--c, var(--accent)); transition:width .4s ease; }
+  .bar .f.ind { width:35% !important; animation:slide 1.4s ease-in-out infinite; }
+  @keyframes slide { 0% { margin-left:-35%; } 100% { margin-left:100%; } }
+  .bar .p { font-family:var(--f-num); color:var(--muted); font-size:12px; min-width:34px; text-align:right; }
+  .detail { margin-top:12px; padding-top:10px; border-top:1px solid var(--line); cursor:default; animation:unfold .28s ease-out; user-select:text; }
+  @keyframes unfold { from { opacity:0; transform:translateY(-6px); } }
+  .detail h4 { margin:10px 0 4px; font-size:10.5px; color:var(--muted); font-weight:500; text-transform:uppercase; letter-spacing:.1em; }
+  .detail h4:first-child { margin-top:0; }
+  .detail .box { border:1px solid var(--line); border-radius:3px; padding:6px 8px; background:var(--stagebg); white-space:pre-wrap; overflow-wrap:anywhere; max-height:160px; overflow:auto; }
+  .detail .warn { color:var(--s-alert); }
+  .tasks { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:7px; }
+  .tasks li { display:grid; grid-template-columns:16px 1fr auto; gap:8px; align-items:center; }
+  .tasks .stt { font-size:10.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; }
+  .chk { width:12px; height:12px; border-radius:2px; border:1.5px solid var(--idle); }
+  .chk.done { background:var(--s-done); border-color:var(--s-done); } .chk.now { border-color:var(--s-run); border-width:2px; animation:blink 1.2s ease-in-out infinite; }
+  @keyframes blink { 50% { opacity:.4; } }
+  svg.links { position:absolute; left:0; top:0; pointer-events:none; overflow:visible; }
+  svg.links path { fill:none; stroke:var(--line2); stroke-width:1.2; }
+  svg.links path.live { stroke:var(--s-run); stroke-dasharray:6 6; animation:flow 1s linear infinite; }
+  @keyframes flow { to { stroke-dashoffset:-12; } }
+  .row { display:grid; grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) 140px; gap:14px; align-items:center; }
 
-  #legend { left: 12px; bottom: 12px; padding: 8px 10px; display: flex; flex-wrap: wrap; gap: 4px 12px; max-width: min(560px, calc(100vw - 24px)); }
-  .lg { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #aeb4c0; cursor: pointer; user-select: none;
-    padding: 2px 4px; border-radius: 5px; }
-  .lg:hover { background: rgba(255,255,255,.05); }
-  .lg.off { opacity: .35; text-decoration: line-through; }
-  .lg i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
-  .lg.static { cursor: default; }
-  .lg.static:hover { background: none; }
-
-  #status { right: 12px; bottom: 12px; padding: 6px 10px; font-size: 11.5px; color: var(--muted); display: flex; align-items: center; gap: 7px; }
-  #status i { width: 8px; height: 8px; border-radius: 50%; background: #ff4d4f; display: inline-block; }
-  #status.ok i { background: #3ddc84; }
-  #help { color: var(--faint); }
-
-  /* Bulles d'information : on les déplace en cliquant-glissant dessus */
-  #bubbles { position: fixed; inset: 0; pointer-events: none; z-index: 20; }
-  .panel { z-index: 10; }
-  .bubble { position: absolute; width: 320px; max-width: calc(100vw - 24px); background: #151923; border: 1.5px solid var(--c, #888);
-    border-radius: 11px; box-shadow: 0 10px 30px rgba(0,0,0,.55); pointer-events: auto; cursor: grab; user-select: none;
-    touch-action: none; }
-  .bubble.grabbing { cursor: grabbing; box-shadow: 0 16px 40px rgba(0,0,0,.7); }
-  .bubble header { display: flex; align-items: center; gap: 8px; padding: 9px 10px 6px 12px; }
-  .bubble header i { width: 10px; height: 10px; border-radius: 50%; background: var(--c); flex: none; box-shadow: 0 0 8px var(--c); }
-  .bubble header b { flex: 1; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .bubble header button { background: none; border: none; color: var(--muted); font-size: 16px; cursor: pointer; padding: 0 4px; line-height: 1; }
-  .bubble header button:hover { color: var(--text); }
-  .bubble .body { padding: 0 12px 11px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #c9ced8;
-    max-height: calc(100vh - 70px); overflow-y: auto; }
-  .bubble .meta { color: var(--muted); }
-  .bubble .chip { display: inline-flex; align-items: center; gap: 5px; padding: 1px 7px; border-radius: 999px;
-    background: rgba(255,255,255,.06); font-size: 11.5px; }
-  .bubble .chip i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
-  .bubble pre { margin: 2px 0; padding: 6px 8px; background: #0f1218; border-radius: 6px; max-height: 140px; overflow: auto;
-    white-space: pre-wrap; word-break: break-all; font: 11.5px/1.4 ui-monospace, "Cascadia Code", Consolas, monospace;
-    color: #dfe3ea; user-select: text; cursor: text; }
-  .bubble ul { list-style: none; margin: 2px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
-  .bubble li { display: flex; gap: 6px; align-items: baseline; }
-  .bubble li i { width: 7px; height: 7px; border-radius: 50%; flex: none; transform: translateY(-1px); }
-  .bubble li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
-  .bubble li em { font-style: normal; color: var(--faint); flex: none; }
-  .bubble .gone { color: #ff9f43; }
+  /* Chat, avec la progression du projet en tête et le menu Réglages */
+  .chat { position:relative; border:1px solid var(--line); border-radius:5px; background:var(--panel); padding:10px 14px; display:flex; flex-direction:column; gap:8px; }
+  .projrow { display:flex; align-items:center; gap:12px; }
+  .projrow .lbl { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.1em; }
+  .projrow .bar { flex:1; margin:0; }
+  .projrow .bar .t { height:13px; -webkit-mask:repeating-linear-gradient(90deg,#000 0 12px,transparent 12px 15px); mask:repeating-linear-gradient(90deg,#000 0 12px,transparent 12px 15px); }
+  .projrow .bar .p { font-size:13px; color:var(--text); }
+  .dots { display:flex; gap:4px; } .dots i { width:9px; height:13px; border-radius:1px; display:block; }
+  .chathead { display:flex; align-items:center; gap:14px; }
+  .msgs { display:flex; flex-direction:column; gap:6px; max-height:110px; overflow:auto; }
+  .msgs .none { color:var(--muted); font-size:12px; }
+  .m { max-width:78%; padding:6px 10px; border-radius:4px; font-size:12.5px; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .m.a { background:var(--card); border:1px solid var(--line); } .m.u { align-self:flex-end; background:var(--userbg); }
+  .m .st { display:block; margin-top:3px; font-size:10.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; }
+  .m.failed { border:1px solid var(--s-fail); } .m.failed .st { color:var(--s-fail); }
+  .in { display:flex; gap:8px; }
+  .in input { flex:1; background:var(--inbg); border:1px solid var(--line); border-radius:3px; color:var(--text); padding:8px 10px; font:inherit; }
+  .in button { background:var(--soft); border:1px solid var(--accent); border-radius:3px; color:var(--accent); padding:0 16px; font:600 12px var(--f-ui); text-transform:uppercase; letter-spacing:.1em; cursor:pointer; }
+  .in button.gear { border-color:var(--line); color:var(--muted); padding:0 11px; font-size:15px; }
+  .in button.gear.on, .in button.gear:hover { color:var(--text); border-color:var(--line2); }
+  .err { color:var(--s-fail); font-size:12px; }
+  .err:empty { display:none; }
+  .menu { position:absolute; right:14px; bottom:54px; width:250px; background:var(--panel); border:1px solid var(--line2); border-radius:5px; padding:12px;
+    box-shadow:0 12px 30px rgba(0,0,0,.4); display:none; z-index:20; animation:unfold .2s ease-out; }
+  .menu.open { display:block; }
+  .menu h4 { margin:0 0 6px; font-size:10.5px; color:var(--muted); font-weight:500; text-transform:uppercase; letter-spacing:.1em; }
+  .menu .opts + h4 { margin-top:12px; }
+  .opts { display:flex; flex-direction:column; gap:4px; } .opts.inline { flex-direction:row; }
+  .opts button { text-align:left; background:var(--card); border:1px solid var(--line); color:var(--muted); border-radius:3px; padding:7px 10px; font:inherit; cursor:pointer; flex:1; }
+  .opts button.on { color:var(--text); border-color:var(--accent); background:var(--soft); }
+  .grip { position:absolute; left:0; right:0; top:-8px; height:14px; cursor:ns-resize; z-index:5; touch-action:none; }
+  .grip::after { content:""; position:absolute; left:50%; top:5px; width:48px; height:3px; margin-left:-24px; border-radius:2px; background:var(--line2); }
+  .grip:hover::after, .chat.resizing .grip::after { background:var(--muted); }
+  .chat.sized .msgs { flex:1; max-height:none; }
+  .status { font-size:10.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; margin-left:auto; }
 </style>
 </head>
 <body>
-<canvas id="c"></canvas>
-<div id="g3d"></div>
-<canvas id="ov"></canvas>
-<div id="bubbles"></div>
-
-<div id="top" class="panel">
-  <div class="seg" title="Vue en 2D ou en 3D"><button id="m2d" class="on">2D</button><button id="m3d">3D</button></div>
-  <div class="search-wrap">
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-    <input id="search" placeholder="Rechercher des nœuds…" autocomplete="off" spellcheck="false">
-  </div>
-  <div id="stats">Connexion…</div>
-  <div id="sessions" title="Clique sur une session pour la masquer ou l'afficher"></div>
-</div>
-<div id="empty" class="panel">En attente des sessions Claude…<br>Les sessions qui ont le mod agent-viewer apparaîtront ici.</div>
-
-<details id="settings" class="panel">
-  <summary>Réglages</summary>
-  <div class="settings-body">
-    <div class="group-title">Filtres</div>
-    <label class="toggle">Afficher les actions <input type="checkbox" id="showActions" checked></label>
-    <label class="toggle">Masquer les agents terminés <input type="checkbox" id="hideDone"></label>
-    <label class="toggle">Toujours afficher les libellés <input type="checkbox" id="allLabels"></label>
-    <div class="group-title">Forces</div>
-    <label class="slider"><span>Force centrale <output id="o-center"></output></span><input type="range" id="center" min="0" max="1" step="0.01"></label>
-    <label class="slider"><span>Force de répulsion <output id="o-repel"></output></span><input type="range" id="repel" min="0" max="20" step="0.1"></label>
-    <label class="slider"><span>Force des liens <output id="o-link"></output></span><input type="range" id="link" min="0" max="1" step="0.01"></label>
-    <label class="slider"><span>Distance des liens <output id="o-dist"></output></span><input type="range" id="dist" min="20" max="400" step="1"></label>
-    <div class="group-title">3D</div>
-    <label class="toggle">Rotation automatique <input type="checkbox" id="autoRotate"></label>
-    <label class="toggle">Lueur des nœuds <input type="checkbox" id="bloom"></label>
-    <div class="group-title">Affichage</div>
-    <label class="slider"><span>Taille des nœuds <output id="o-size"></output></span><input type="range" id="size" min="0.4" max="2.5" step="0.05"></label>
-    <label class="slider"><span>Épaisseur des liens <output id="o-thick"></output></span><input type="range" id="thick" min="0.3" max="4" step="0.1"></label>
-    <div class="row">
-      <button class="btn" id="fit">Recentrer</button>
-      <button class="btn" id="closeAll">Fermer les bulles</button>
+<div class="app">
+  <div class="stage" id="stage">
+    <div class="world" id="world"></div>
+    <div class="topleft"><span class="live" id="live"></span><select id="session"></select></div>
+    <div class="hud">
+      <button id="zoom-out" data-i18n-title="zoomOut">−</button><span id="zoom-val">100 %</span><button id="zoom-in" data-i18n-title="zoomIn">+</button>
+      <button id="fit" data-i18n="fit" data-i18n-title="fitTitle"></button>
+      <button id="reset" data-i18n="reset" data-i18n-title="resetTitle"></button>
     </div>
-    <button class="btn" id="reset">Réglages par défaut</button>
+    <div class="legend" id="legend"></div>
+    <div class="empty" id="empty" hidden></div>
   </div>
-</details>
-
-<div id="legend" class="panel"></div>
-<div id="status" class="panel"><i></i><span id="status-text">Connexion…</span><span id="help"></span></div>
-
+  <div class="chat" id="chat">
+    <div class="grip" id="grip" data-i18n-title="gripTitle"></div>
+    <div class="projrow" id="proj"></div>
+    <div class="chathead"><div class="ttl" style="font-size:12px"><span data-i18n="chatWith"></span> · <span id="who"></span></div><span class="status" id="conn"></span></div>
+    <div class="msgs" id="msgs"></div>
+    <div class="err" id="err"></div>
+    <form class="in" id="form"><input id="input" autocomplete="off"><button type="submit" data-i18n="send"></button><button type="button" class="gear" id="gear" data-i18n-title="settings">⚙</button></form>
+    <div class="menu" id="menu">
+      <h4 data-i18n="layout"></h4>
+      <div class="opts" data-opt="layout"><button data-val="A" data-i18n="layoutA"></button><button data-val="B" data-i18n="layoutB"></button><button data-val="C" data-i18n="layoutC"></button></div>
+      <h4 data-i18n="theme"></h4>
+      <div class="opts inline" data-opt="theme"><button data-val="sombre" data-i18n="dark"></button><button data-val="clair" data-i18n="light"></button></div>
+      <h4 data-i18n="language"></h4>
+      <div class="opts inline" data-opt="lang"><button data-val="fr">FR</button><button data-val="en">EN</button></div>
+    </div>
+  </div>
+</div>
 <script>
 'use strict'
-
-// ---------- Couleurs par type d'action (les mêmes que le panneau) ----------
-const CATS = {
-  read:   { label: 'Lecture',   color: '#4FA3FF' },
-  search: { label: 'Recherche', color: '#A970FF' },
-  edit:   { label: 'Écriture',  color: '#FF9F43' },
-  shell:  { label: 'Commande',  color: '#3DDC84' },
-  web:    { label: 'Web',       color: '#22D3EE' },
-  agent:  { label: 'Agents',    color: '#FF5FA2' },
-  mcp:    { label: 'Outil MCP', color: '#F7D046' },
-  other:  { label: 'Autre',     color: '#9AA4B2' },
+// ---------- Textes FR / EN ----------
+const T = {
+  fr: { zoomOut:'Dézoomer', zoomIn:'Zoomer', fit:'Ajuster', fitTitle:'Voir tous les agents', reset:'Remettre en place', resetTitle:'Remettre les bulles à leur place',
+    gripTitle:"Tirer pour agrandir le chat · double-clic : taille d'origine", chatWith:'Chat', send:'Envoyer', settings:'Réglages', layout:'Disposition',
+    layoutA:'Organigramme', layoutB:'Arbre horizontal', layoutC:'Tableau par lignes', theme:'Thème', dark:'Sombre', light:'Clair', language:'Langue',
+    done:'Terminé', run:'En cours', wait:'En attente', fail:'Échec', stopped:'Arrêté', alert:'Alerte', project:'Projet',
+    request:'Demande', final:'Réponse finale', mainAgent:'Agent principal', mainSub:'Coordonne le travail', noRequest:'Pas encore de demande',
+    finWait:'En attente des agents', finReady:'Prête', finFail:'Interrompue',
+    does:"Ce que fait l'agent", part:'Partie du projet', tasks:"Tâches de l'agent", action:'Action en cours', thinking:'Réflexion…',
+    noTasks:"Pas encore de liste de tâches : pas de pourcentage plutôt qu'un chiffre inventé.", stale:"Liste non mise à jour : pas de pourcentage plutôt qu'un chiffre faux.",
+    allSteps:'Toutes les étapes', unknownPart:'—', tDone:'Faite', tNow:'En cours', tTodo:'À faire', agentCol:'Agent', progressCol:'Avancement',
+    placeholder:"Écrire à l'agent sélectionné…", noMsgs:'Pas encore de message avec cet agent.', mQueued:'En file', mSent:'Transmis', mFailed:'Refusé', mSending:'Envoi…',
+    live:'En direct', reconnect:'Reconnexion…', noSession:'En attente des sessions Claude…\nLes sessions qui ont le mod agent-viewer apparaîtront ici.',
+    inactive:'inactive', emptyMsg:'Écris un message avant d’envoyer.', sendFail:"L'envoi a échoué : ", requestTitle:'Ta dernière demande', finalTitle:'Réponse de l’agent principal' },
+  en: { zoomOut:'Zoom out', zoomIn:'Zoom in', fit:'Fit', fitTitle:'Show all agents', reset:'Reset layout', resetTitle:'Put the bubbles back in place',
+    gripTitle:'Drag to resize the chat · double-click: original size', chatWith:'Chat', send:'Send', settings:'Settings', layout:'Layout',
+    layoutA:'Org chart', layoutB:'Horizontal tree', layoutC:'Table', theme:'Theme', dark:'Dark', light:'Light', language:'Language',
+    done:'Done', run:'Running', wait:'Waiting', fail:'Failed', stopped:'Stopped', alert:'Alert', project:'Project',
+    request:'Request', final:'Final answer', mainAgent:'Main agent', mainSub:'Coordinates the work', noRequest:'No request yet',
+    finWait:'Waiting for the agents', finReady:'Ready', finFail:'Interrupted',
+    does:'What the agent does', part:'Part of the project', tasks:"Agent's tasks", action:'Current action', thinking:'Thinking…',
+    noTasks:'No task list yet: no percentage rather than a made-up number.', stale:'Task list never updated: no percentage rather than a wrong one.',
+    allSteps:'All steps', unknownPart:'—', tDone:'Done', tNow:'Running', tTodo:'To do', agentCol:'Agent', progressCol:'Progress',
+    placeholder:'Write to the selected agent…', noMsgs:'No messages with this agent yet.', mQueued:'Queued', mSent:'Relayed', mFailed:'Refused', mSending:'Sending…',
+    live:'Live', reconnect:'Reconnecting…', noSession:'Waiting for Claude sessions…\nSessions with the agent-viewer mod will show up here.',
+    inactive:'inactive', emptyMsg:'Write a message first.', sendFail:'Sending failed: ', requestTitle:'Your last request', finalTitle:"Main agent's answer" },
 }
-const THINKING = '#C8B6FF', IDLE = '#5B6475', FAILED = '#FF4D4F', MAIN = 'main'
-const STATE_LABEL = { running: 'en cours', done: 'terminé', failed: 'échec', stopped: 'arrêté' }
-
-function categorize(tool) {
-  if (/^(Read|NotebookRead)$/.test(tool)) return 'read'
-  if (/^(Grep|Glob|ToolSearch|LS)$/.test(tool)) return 'search'
-  if (/^(Edit|Write|MultiEdit|NotebookEdit)$/.test(tool)) return 'edit'
-  if (/^(Bash|PowerShell|Monitor|BashOutput|KillShell|TaskStop)$/.test(tool)) return 'shell'
-  if (/^(WebFetch|WebSearch)$/.test(tool) || /browser|chrome/i.test(tool)) return 'web'
-  if (/^(Agent|Task|SendMessage|ListAgents)$/.test(tool)) return 'agent'
-  if (tool.startsWith('mcp__')) return 'mcp'
-  return 'other'
-}
-const shortTool = t => t.startsWith('mcp__') ? (t.split('__').pop() || t) : t
-const clip = (s, n) => s.length > n ? s.slice(0, n - 1) + '…' : s
-function fmtDur(ms) {
-  const s = Math.max(0, Math.round(ms / 1000))
-  if (s < 60) return s + 's'
-  const m = Math.floor(s / 60)
-  return m < 60 ? `${m}m${String(s % 60).padStart(2, '0')}` : `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}`
-}
-function agentColor(a) {
-  if (a.isMain && !a.isLive) return '#3a404d'
-  if (a.state === 'failed') return FAILED
-  if (a.state !== 'running') return IDLE
-  if (a.currentToolName) return CATS[categorize(a.currentToolName)].color
-  return THINKING
+const store = { get(k, d){ try { const v = localStorage.getItem('av-'+k); return v == null ? d : JSON.parse(v) } catch { return d } },
+  set(k, v){ try { localStorage.setItem('av-'+k, JSON.stringify(v)) } catch {} } }
+let lang = store.get('lang', (navigator.language || 'fr').toLowerCase().startsWith('fr') ? 'fr' : 'en')
+const t = k => (T[lang] && T[lang][k]) ?? T.fr[k] ?? k
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[c])
+function applyTexts(){
+  document.documentElement.lang = lang
+  document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n) })
+  document.querySelectorAll('[data-i18n-title]').forEach(el => { el.title = t(el.dataset.i18nTitle) })
+  document.getElementById('input').placeholder = t('placeholder')
+  document.getElementById('legend').innerHTML = ['done','run','wait','fail','alert'].map(k => `<span class="st-${k}"><i></i>${esc(t(k))}</span>`).join('')
 }
 
-// ---------- Réglages (gardés dans le navigateur) ----------
-const DEFAULTS = { center: 0.1, repel: 11, link: 0.45, dist: 85, size: 1, thick: 1, showActions: true, hideDone: false, allLabels: false, hiddenCats: [], mode: '2d', autoRotate: false, bloom: true }
-let cfg = { ...DEFAULTS }
-try { Object.assign(cfg, JSON.parse(localStorage.getItem('agent-graph-cfg') || '{}')) } catch {}
-const saveCfg = () => { try { localStorage.setItem('agent-graph-cfg', JSON.stringify(cfg)) } catch {} }
-const hiddenCats = new Set(cfg.hiddenCats)
+// ---------- État ----------
+let payload = { sessions: [] }, connected = false
+let sessionId = store.get('session', null), sel = null, popId = null
+let layout = store.get('layout', 'A'), theme = store.get('theme', 'sombre'), offsets = store.get('offsets', {})
+const cam = { x:0, y:0, k:1 }
+let needFit = true, pending = []   // messages envoyés, pas encore revenus dans l'état de la session
+const MAIN = 'main'
 
-// ---------- Données ----------
-let raw = { agents: [], actions: [], now: Date.now() }
-let sessionsRaw = []
-let lastPayload = { sessions: [], now: Date.now() }
-const hiddenSessions = new Set(cfg.hiddenSessions || [])
-const folderName = p => (p || '').split(/[\\/]/).filter(Boolean).pop() || p || ''
+const session = () => payload.sessions.find(s => s.id === sessionId)
+const ICONS = { req:'✉', main:'◎', fin:'⇥' }
+function kindIcon(a){
+  const n = a.currentToolName || ''
+  if (/^(Read|Grep|Glob|ToolSearch|LS)$/.test(n)) return '⌕'
+  if (/^(Bash|PowerShell|Monitor)$/.test(n)) return '⚒'
+  if (/^(Edit|Write|MultiEdit|NotebookEdit)$/.test(n)) return '✎'
+  if (/^(WebFetch|WebSearch)$/.test(n) || /browser|chrome/i.test(n)) return '◍'
+  return a.type === 'Explore' ? '⌕' : a.type === 'Plan' ? '☰' : '◆'
+}
 
-// Toutes les sessions mises à plat : chaque id est préfixé par sa session, pour ne jamais les mélanger.
-// L'agent principal de chaque session porte le nom de la session.
-function flatten(payload) {
-  const list = Array.isArray(payload.sessions)
-    ? payload.sessions
-    : [{ id: 'local', title: '', cwd: '', agents: payload.agents || [], actions: payload.actions || [], isLive: true }]
-  sessionsRaw = list
-  const agents = [], actions = []
-  for (const s of list) {
-    if (hiddenSessions.has(s.id)) continue
-    const key = id => s.id + ':' + id
-    const title = s.title || folderName(s.cwd) || 'Session ' + s.id.slice(0, 6)
-    const info = { sessionId: s.id, isLive: !!s.isLive, sessionTitle: title, sessionCwd: s.cwd || '' }
-    let hasMain = false
-    for (const a of s.agents) {
-      const isMain = a.id === MAIN
-      if (isMain) hasMain = true
-      agents.push({
-        ...a, ...info, isMain,
-        id: key(a.id),
-        parentId: isMain ? undefined : key(a.parentId || MAIN),
-        description: isMain ? title : a.description,
-        type: isMain ? 'session · ' + (folderName(s.cwd) || '?') : a.type,
-      })
-    }
-    if (!hasMain) {
-      agents.unshift({ ...info, isMain: true, id: key(MAIN), type: 'session · ' + (folderName(s.cwd) || '?'), description: title,
-        state: s.isLive ? 'done' : 'stopped', startedAt: payload.now || Date.now(), toolCount: 0, recentTools: [] })
-    }
-    for (const x of s.actions) actions.push({ ...x, id: key(x.id), agentId: key(x.agentId), sessionId: s.id })
+// État affiché d'un agent : alerte d'abord, puis ce que dit Claude Code
+function stateOf(a){
+  if (a.alert) return 'alert'
+  if (a.state === 'failed' || a.status === 'failed') return 'fail'
+  if (a.state === 'stopped' || a.status === 'killed') return 'stopped'
+  if (a.status === 'pending' || a.status === 'waiting' || a.status === 'idle') return 'wait'
+  if (a.state === 'running' || a.status === 'running') return 'run'
+  return 'done'
+}
+const CLS = { run:'st-run', done:'st-done', wait:'st-wait', fail:'st-fail', stopped:'st-fail', alert:'st-alert' }
+
+// % d'un agent : tâches faites ÷ total, jamais inventé
+function progress(a){
+  const tasks = a.tasks || []
+  if (!tasks.length) return { p:null, note:'noTasks' }
+  const done = tasks.filter(x => x.status === 'completed').length
+  const st = stateOf(a)
+  if ((st === 'done' || st === 'fail' || st === 'stopped') && (a.taskUpdates || 0) <= 1 && done < tasks.length) return { p:null, note:'stale' }
+  return { p: Math.round(done / tasks.length * 100), note:null }
+}
+
+// ---------- Construction des nœuds à partir de la session ----------
+function nodes(){
+  const s = session(); if (!s) return null
+  const agents = s.agents || []
+  const main = agents.find(a => a.id === MAIN) || { id:MAIN, type:'principal', description:t('mainAgent'), state:'done', startedAt:Date.now(), toolCount:0, recentTools:[] }
+  const subs = agents.filter(a => a.id !== MAIN)
+  const fin = s.final || null
+  const finState = !fin ? 'wait' : fin.state === 'waiting' ? 'wait' : fin.state === 'ready' ? 'done' : 'fail'
+  return {
+    s, main, subs,
+    req: { id:'req', kind:'req', name:t('request'), sub: s.request ? s.request.text : t('noRequest'), body: s.request && s.request.text },
+    fin: { id:'fin', kind:'fin', name:t('final'), sub: finState === 'wait' ? t('finWait') : finState === 'done' ? t('finReady') : t('finFail'), st: finState, body: fin && fin.text },
   }
-  return { agents, actions, now: payload.now || Date.now() }
-}
-
-const sessionsEl = document.getElementById('sessions')
-function renderSessions() {
-  sessionsEl.replaceChildren(...sessionsRaw.map(s => {
-    const subs = s.agents.filter(a => a.id !== MAIN)
-    const running = subs.filter(a => a.state === 'running').length
-    const title = s.title || folderName(s.cwd) || 'Session ' + s.id.slice(0, 6)
-    return h('div', {
-      class: 'ss' + (hiddenSessions.has(s.id) ? ' off' : ''),
-      title: (s.cwd || '') + (s.isLive ? '' : ' — inactive'),
-      onclick: () => {
-        hiddenSessions.has(s.id) ? hiddenSessions.delete(s.id) : hiddenSessions.add(s.id)
-        cfg.hiddenSessions = [...hiddenSessions]; saveCfg()
-        raw = flatten(lastPayload); rebuild(); renderSessions()
-      },
-    }, dot(s.isLive ? '#3DDC84' : '#5B6475'), h('span', {}, title),
-      h('em', {}, running ? `${running} actif${running > 1 ? 's' : ''}` : `${subs.length} ag.`))
-  }))
-  document.getElementById('empty').style.display = sessionsRaw.length ? 'none' : 'block'
-}
-let receivedAt = Date.now()
-const nowEst = () => raw.now + (Date.now() - receivedAt)
-
-/** Nœuds par id : { id, kind, x, y, vx, vy, fx, fy, r, color, label, ref } */
-const nodes = new Map()
-let links = []          // { s, t, kind }
-let neighbors = new Map()
-let alpha = 1, alphaTarget = 0
-
-function rebuild() {
-  const agents = raw.agents.filter(a => !cfg.hideDone || a.state === 'running' || a.isMain)
-  const agentIds = new Set(agents.map(a => a.id))
-  const parentOf = a => a.isMain ? null : (a.parentId && agentIds.has(a.parentId) ? a.parentId : a.sessionId + ':' + MAIN)
-
-  const wanted = new Map()
-  const newLinks = []
-  const degree = new Map()
-  const bump = id => degree.set(id, (degree.get(id) || 0) + 1)
-
-  for (const a of agents) {
-    const id = 'ag:' + a.id
-    wanted.set(id, { kind: 'agent', ref: a, color: agentColor(a), label: a.description || a.type })
-    const p = parentOf(a)
-    if (p) { newLinks.push({ s: id, t: 'ag:' + p, kind: 'agent' }); bump(id); bump('ag:' + p) }
-  }
-  if (cfg.showActions) {
-    const acts = raw.actions.filter(x => agentIds.has(x.agentId) && !hiddenCats.has(categorize(x.tool))).slice(-220)
-    for (const x of acts) {
-      const id = 'ac:' + x.id
-      const cat = categorize(x.tool)
-      const det = x.detail ? ' ' + (x.detail.split(/[\\/]/).pop() || x.detail) : ''
-      wanted.set(id, { kind: 'action', ref: x, color: x.isError ? FAILED : CATS[cat].color, label: clip(shortTool(x.tool) + det, 28), cat })
-      newLinks.push({ s: id, t: 'ag:' + x.agentId, kind: 'action' }); bump(id); bump('ag:' + x.agentId)
-    }
-  }
-
-  let added = 0
-  for (const id of [...nodes.keys()]) if (!wanted.has(id)) nodes.delete(id)
-  for (const [id, w] of wanted) {
-    let n = nodes.get(id)
-    if (!n) {
-      // Un nouveau nœud naît près de celui auquel il est relié
-      const link = newLinks.find(l => l.s === id)
-      const anchor = link && nodes.get(link.t)
-      const ang = Math.random() * Math.PI * 2
-      const isRoot = w.kind === 'agent' && w.ref.isMain
-      const d = anchor ? 25 + Math.random() * 25 : isRoot ? 220 + Math.random() * 120 : Math.random() * 60
-      n = { id, x: (anchor ? anchor.x : 0) + Math.cos(ang) * d, y: (anchor ? anchor.y : 0) + Math.sin(ang) * d, vx: 0, vy: 0, fx: null, fy: null }
-      nodes.set(id, n); added++
-    }
-    Object.assign(n, w)
-    const deg = degree.get(id) || 0
-    n.baseR = w.kind === 'agent' ? Math.min(24, (w.ref.isMain ? 12 : 8) + Math.sqrt(deg) * 1.6) : 3.6
-  }
-  links = newLinks.filter(l => nodes.has(l.s) && nodes.has(l.t))
-  neighbors = new Map()
-  for (const l of links) {
-    if (!neighbors.has(l.s)) neighbors.set(l.s, new Set())
-    if (!neighbors.has(l.t)) neighbors.set(l.t, new Set())
-    neighbors.get(l.s).add(l.t); neighbors.get(l.t).add(l.s)
-  }
-  if (added) alpha = Math.max(alpha, added > 20 ? 0.8 : 0.35)
-  renderLegend()
-  refreshBubbles()
-  updateStats()
-  if (mode === '3d') sync3D()
-}
-
-// ---------- Physique (dans l'esprit de la vue graphe d'Obsidian) ----------
-function tick() {
-  const list = [...nodes.values()]
-  alpha += (alphaTarget - alpha) * 0.02
-  if (alpha < 0.004 && alphaTarget === 0) return
-  const repel = cfg.repel * 40
-  for (let i = 0; i < list.length; i++) {
-    const a = list[i]
-    for (let j = i + 1; j < list.length; j++) {
-      const b = list[j]
-      let dx = b.x - a.x, dy = b.y - a.y
-      let d2 = dx * dx + dy * dy
-      if (d2 < 0.01) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d2 = 0.25 }
-      if (d2 > 250000 && !(a.ref && b.ref && a.ref.isMain && b.ref.isMain)) continue
-      const ma = a.kind === 'agent' ? 3 : 1, mb = b.kind === 'agent' ? 3 : 1
-      const f = repel * alpha / d2
-      a.vx -= dx * f * mb / ma; a.vy -= dy * f * mb / ma
-      b.vx += dx * f * ma / mb; b.vy += dy * f * ma / mb
-      if (a.ref && b.ref && a.ref.isMain && b.ref.isMain) {
-        const d = Math.sqrt(d2), gap = cfg.dist * 5
-        if (d < gap) {
-          const k = (gap - d) / d * 0.05 * alpha
-          a.vx -= dx * k; a.vy -= dy * k; b.vx += dx * k; b.vy += dy * k
-        }
-      }
-    }
-  }
-  for (const l of links) {
-    const a = nodes.get(l.s), b = nodes.get(l.t)
-    let dx = b.x - a.x, dy = b.y - a.y
-    const d = Math.sqrt(dx * dx + dy * dy) || 1
-    const target = l.kind === 'agent' ? cfg.dist * 2.2 : cfg.dist * 0.55
-    const k = (d - target) / d * cfg.link * alpha * 0.5
-    const wa = b.kind === 'agent' && a.kind !== 'agent' ? 0.85 : 0.5
-    a.vx += dx * k * wa; a.vy += dy * k * wa
-    b.vx -= dx * k * (1 - wa); b.vy -= dy * k * (1 - wa)
-  }
-  for (const n of list) {
-    n.vx -= n.x * cfg.center * 0.02 * alpha
-    n.vy -= n.y * cfg.center * 0.02 * alpha
-    if (n.fx != null) { n.x = n.fx; n.y = n.fy; n.vx = n.vy = 0; continue }
-    n.vx *= 0.6; n.vy *= 0.6
-    n.x += n.vx; n.y += n.vy
-  }
-}
-
-// ---------- Caméra : zoom à la molette, déplacement en glissant le fond ----------
-const canvas = document.getElementById('c')
-const ctx = canvas.getContext('2d')
-let W = 0, H = 0, dpr = 1
-const cam = { x: 0, y: 0, k: 1 }   // écran = monde * k + (W/2 + x, H/2 + y)
-function resize() {
-  dpr = window.devicePixelRatio || 1
-  W = window.innerWidth; H = window.innerHeight
-  canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr)
-  if (window.onResize3D) window.onResize3D()
-}
-window.addEventListener('resize', resize); resize()
-// Rayon dans le monde : en dézoomant, les nœuds rétrécissent moins vite que le graphe (comme dans Obsidian)
-const nodeR = n => n.baseR * cfg.size * (cam.k < 1 ? 1 / Math.sqrt(cam.k) : 1)
-const toScreen = (x, y) => [x * cam.k + W / 2 + cam.x, y * cam.k + H / 2 + cam.y]
-const toWorld = (sx, sy) => [(sx - W / 2 - cam.x) / cam.k, (sy - H / 2 - cam.y) / cam.k]
-
-let camAnim = null
-function fit(animate = true) {
-  if (mode === '3d') { if (G) G.zoomToFit(700, 80); return }
-  fit2D(animate)
-}
-function fit2D(animate) {
-  const list = [...nodes.values()]
-  if (!list.length) return
-  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
-  for (const n of list) { x0 = Math.min(x0, n.x); y0 = Math.min(y0, n.y); x1 = Math.max(x1, n.x); y1 = Math.max(y1, n.y) }
-  const pad = 90
-  const k = Math.max(0.1, Math.min(2.2, Math.min((W - pad * 2) / Math.max(1, x1 - x0), (H - pad * 2) / Math.max(1, y1 - y0))))
-  const target = { k, x: -((x0 + x1) / 2) * k, y: -((y0 + y1) / 2) * k }
-  if (!animate) { Object.assign(cam, target); return }
-  camAnim = { from: { ...cam }, to: target, t0: performance.now() }
-}
-
-canvas.addEventListener('wheel', ev => {
-  ev.preventDefault()
-  camAnim = null
-  const [wx, wy] = toWorld(ev.clientX, ev.clientY)
-  const factor = Math.exp(-ev.deltaY * (ev.ctrlKey ? 0.01 : 0.0015))
-  cam.k = Math.max(0.05, Math.min(8, cam.k * factor))
-  cam.x = ev.clientX - W / 2 - wx * cam.k
-  cam.y = ev.clientY - H / 2 - wy * cam.k
-}, { passive: false })
-
-function hitNode(sx, sy) {
-  const [wx, wy] = toWorld(sx, sy)
-  let best = null, bestD = Infinity
-  for (const n of nodes.values()) {
-    const r = nodeR(n) + 5 / cam.k
-    const d = Math.hypot(n.x - wx, n.y - wy)
-    if (d < r && d < bestD) { best = n; bestD = d }
-  }
-  return best
-}
-
-let hover = null
-let drag = null   // { kind: 'node'|'pan', node, sx, sy, moved, camX, camY }
-canvas.addEventListener('pointerdown', ev => {
-  if (ev.button !== 0) return
-  canvas.setPointerCapture(ev.pointerId)
-  camAnim = null
-  const n = hitNode(ev.clientX, ev.clientY)
-  if (n) {
-    drag = { kind: 'node', node: n, sx: ev.clientX, sy: ev.clientY, moved: false }
-    n.fx = n.x; n.fy = n.y
-    alphaTarget = 0.25; alpha = Math.max(alpha, 0.25)
-    canvas.classList.add('dragging')
-  } else {
-    drag = { kind: 'pan', sx: ev.clientX, sy: ev.clientY, camX: cam.x, camY: cam.y, moved: false }
-    canvas.classList.add('panning')
-  }
-})
-canvas.addEventListener('pointermove', ev => {
-  if (drag) {
-    const dx = ev.clientX - drag.sx, dy = ev.clientY - drag.sy
-    if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true
-    if (drag.kind === 'node') {
-      const [wx, wy] = toWorld(ev.clientX, ev.clientY)
-      drag.node.fx = wx; drag.node.fy = wy
-    } else {
-      cam.x = drag.camX + dx; cam.y = drag.camY + dy
-    }
-    return
-  }
-  const n = hitNode(ev.clientX, ev.clientY)
-  hover = n
-  canvas.classList.toggle('on-node', !!n)
-})
-function endDrag(ev) {
-  if (!drag) return
-  if (drag.kind === 'node') {
-    const n = drag.node
-    n.fx = n.fy = null
-    alphaTarget = 0
-    if (!drag.moved) toggleBubble(n.id, ev.clientX, ev.clientY)
-  }
-  drag = null
-  canvas.classList.remove('dragging', 'panning')
-}
-canvas.addEventListener('pointerup', endDrag)
-canvas.addEventListener('pointercancel', endDrag)
-canvas.addEventListener('pointerleave', () => { if (!drag) hover = null })
-canvas.addEventListener('dblclick', ev => { if (!hitNode(ev.clientX, ev.clientY)) fit() })
-window.addEventListener('keydown', ev => {
-  if (ev.target instanceof HTMLInputElement) return
-  if (ev.key === 'Escape') closeAllBubbles()
-  if (ev.key === 'f' || ev.key === 'F') fit()
-})
-
-// ---------- Bulles d'information ----------
-const bubbleLayer = document.getElementById('bubbles')
-const bubbles = new Map()   // id -> { el, ox, oy, lastX, lastY }
-
-function toggleBubble(id, sx, sy) {
-  if (bubbles.has(id)) { closeBubble(id); return }
-  const n = nodes.get(id)
-  if (!n) return
-  const el = document.createElement('div')
-  el.className = 'bubble'
-  const [nx, ny] = nodeScreen(id) || [W / 2, H / 2]
-  // Placée à droite du nœud, ou à gauche si la place manque
-  const bw = Math.min(320, W - 24)
-  let left = nx + 22 + bw > W - 8 ? nx - 22 - bw : nx + 22
-  left = Math.max(8, Math.min(W - bw - 8, left))
-  const top = Math.max(8, Math.min(H - 240, ny - 30))
-  const b = { el, ox: left - nx, oy: top - ny, lastX: nx, lastY: ny }
-  bubbles.set(id, b)
-  bubbleLayer.appendChild(el)
-  makeDraggable(el, b)
-  fillBubble(id)
-}
-function closeBubble(id) {
-  const b = bubbles.get(id)
-  if (b) { b.el.remove(); bubbles.delete(id) }
-}
-function closeAllBubbles() { for (const id of [...bubbles.keys()]) closeBubble(id) }
-
-function makeDraggable(el, b) {
-  let start = null
-  el.addEventListener('pointerdown', ev => {
-    if (ev.button !== 0 || ev.target.closest('button, pre')) return
-    ev.preventDefault()
-    el.setPointerCapture(ev.pointerId)
-    start = { x: ev.clientX, y: ev.clientY, ox: b.ox, oy: b.oy }
-    el.classList.add('grabbing')
-    bubbleLayer.appendChild(el)   // passe au premier plan
-  })
-  el.addEventListener('pointermove', ev => {
-    if (!start) return
-    b.ox = start.ox + ev.clientX - start.x
-    b.oy = start.oy + ev.clientY - start.y
-    placeBubble(b)
-  })
-  const stop = () => { start = null; el.classList.remove('grabbing') }
-  el.addEventListener('pointerup', stop)
-  el.addEventListener('pointercancel', stop)
-}
-function placeBubble(b) {
-  b.el.style.left = Math.round(b.lastX + b.ox) + 'px'
-  b.el.style.top = Math.round(b.lastY + b.oy) + 'px'
-}
-
-// Construit le contenu avec textContent : les commandes et chemins ne sont jamais interprétés comme du HTML
-function h(tag, props = {}, ...kids) {
-  const el = document.createElement(tag)
-  for (const [k, v] of Object.entries(props)) {
-    if (k === 'style') el.setAttribute('style', v)
-    else if (k === 'class') el.className = v
-    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v)
-    else el.setAttribute(k, v)
-  }
-  for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid instanceof Node ? kid : String(kid))
-  return el
-}
-const dot = color => h('i', { style: `background:${color}` })
-
-function fillBubble(id) {
-  const b = bubbles.get(id)
-  if (!b) return
-  const n = nodes.get(id)
-  const el = b.el
-  el.replaceChildren()
-  if (!n) {
-    el.append(h('header', {}, h('i'), h('b', {}, 'Nœud retiré'), h('button', { title: 'Fermer', onclick: () => closeBubble(id) }, '×')),
-      h('div', { class: 'body' }, h('div', { class: 'gone' }, 'Ce nœud n\'est plus dans le graphe (filtré ou effacé).')))
-    return
-  }
-  el.style.setProperty('--c', n.color)
-  const now = nowEst()
-  const close = h('button', { title: 'Fermer', onclick: () => closeBubble(id) }, '×')
-  if (n.kind === 'agent') {
-    const a = n.ref
-    const acts = raw.actions.filter(x => x.agentId === a.id)
-    const recent = acts.slice(-6).reverse()
-    const current = a.state === 'running' ? (a.currentTool || 'réflexion…') : '—'
-    const curColor = a.currentToolName ? CATS[categorize(a.currentToolName)].color : THINKING
-    el.append(
-      h('header', {}, h('i'), h('b', { title: a.description }, a.description || a.type), close),
-      h('div', { class: 'body' },
-        a.isMain
-          ? h('div', { class: 'meta' }, (a.isLive ? 'Session active' : 'Session inactive') + (a.sessionCwd ? ' · ' + a.sessionCwd : ''))
-          : h('div', { class: 'meta' }, [a.type, a.model, a.isBackground ? 'arrière-plan' : null].filter(Boolean).join(' · ')),
-        h('div', {}, h('span', { class: 'chip' }, dot(n.color), STATE_LABEL[a.state] || a.state), '  ',
-          fmtDur((a.endedAt ?? now) - a.startedAt), ' · ', a.toolCount, a.toolCount > 1 ? ' outils' : ' outil'),
-        h('div', {}, 'Action : ', a.state === 'running' ? h('span', { class: 'chip' }, dot(curColor), clip(current, 60)) : '—'),
-        recent.length ? h('div', { class: 'meta' }, 'Dernières actions') : null,
-        recent.length ? h('ul', {}, recent.map(x => h('li', {},
-          dot(x.isError ? FAILED : CATS[categorize(x.tool)].color),
-          h('span', { title: x.detail }, shortTool(x.tool) + (x.detail ? ' · ' + x.detail : '')),
-          h('em', {}, x.endedAt === undefined ? 'en cours' : fmtDur(x.endedAt - x.startedAt))))) : null,
-      ),
-    )
-  } else {
-    const x = n.ref
-    const cat = categorize(x.tool)
-    const running = x.endedAt === undefined
-    const owner = raw.agents.find(a => a.id === x.agentId)
-    el.append(
-      h('header', {}, h('i'), h('b', {}, CATS[cat].label + ' — ' + shortTool(x.tool)), close),
-      h('div', { class: 'body' },
-        x.tool !== shortTool(x.tool) ? h('div', { class: 'meta' }, x.tool) : null,
-        x.detail ? h('pre', {}, x.detail) : h('div', { class: 'meta' }, '(sans argument)'),
-        h('div', {}, 'Agent : ', owner ? owner.description : x.agentId),
-        h('div', {}, h('span', { class: 'chip' }, dot(x.isError ? FAILED : running ? THINKING : '#3DDC84'),
-          running ? 'en cours depuis ' + fmtDur(now - x.startedAt) : x.isError ? 'échec après ' + fmtDur(x.endedAt - x.startedAt) : 'terminé en ' + fmtDur(x.endedAt - x.startedAt))),
-      ),
-    )
-  }
-}
-function refreshBubbles() { for (const id of bubbles.keys()) fillBubble(id) }
-setInterval(refreshBubbles, 1000)
-
-// ---------- Légende (clic = masquer / afficher une catégorie) ----------
-const legendEl = document.getElementById('legend')
-function renderLegend() {
-  const counts = {}
-  for (const x of raw.actions) { const c = categorize(x.tool); counts[c] = (counts[c] || 0) + 1 }
-  legendEl.replaceChildren(
-    ...Object.entries(CATS).filter(([c]) => counts[c] || hiddenCats.has(c)).map(([c, v]) =>
-      h('span', { class: 'lg' + (hiddenCats.has(c) ? ' off' : ''), title: 'Cliquer pour masquer / afficher', onclick: () => {
-        hiddenCats.has(c) ? hiddenCats.delete(c) : hiddenCats.add(c)
-        cfg.hiddenCats = [...hiddenCats]; saveCfg(); rebuild()
-      } }, dot(v.color), `${v.label} (${counts[c] || 0})`)),
-    h('span', { class: 'lg static' }, dot(THINKING), 'Réflexion'),
-    h('span', { class: 'lg static' }, dot(IDLE), 'Terminé'),
-    h('span', { class: 'lg static' }, dot(FAILED), 'Échec'),
-  )
-}
-
-// ---------- Recherche ----------
-const searchEl = document.getElementById('search')
-let query = ''
-searchEl.addEventListener('input', () => { query = searchEl.value.trim().toLowerCase(); restyle3D() })
-function matches(n) {
-  if (!query) return true
-  const r = n.ref
-  const text = n.kind === 'agent' ? `${r.description} ${r.type} ${r.model || ''}` : `${r.tool} ${r.detail}`
-  return text.toLowerCase().includes(query)
-}
-
-function updateStats() {
-  const subs = raw.agents.filter(a => !a.isMain)
-  const running = subs.filter(a => a.state === 'running').length
-  const n = sessionsRaw.length
-  document.getElementById('stats').textContent =
-    `${n} session${n > 1 ? 's' : ''} · ${running} actif${running > 1 ? 's' : ''} · ${subs.length} sous-agent${subs.length > 1 ? 's' : ''} · ${raw.actions.length} action${raw.actions.length > 1 ? 's' : ''}`
 }
 
 // ---------- Dessin ----------
-function draw(t) {
-  if (camAnim) {
-    const p = Math.min(1, (t - camAnim.t0) / 450), e = 1 - Math.pow(1 - p, 3)
-    for (const k of ['x', 'y', 'k']) cam[k] = camAnim.from[k] + (camAnim.to[k] - camAnim.from[k]) * e
-    if (p >= 1) camAnim = null
+const stage = document.getElementById('stage'), world = document.getElementById('world')
+const bar = (p, cls) => `<div class="bar ${cls||''}"><div class="t"><div class="f ${p==null?'ind':''}" style="width:${p??0}%"></div></div><span class="p">${p==null?'—':p+' %'}</span></div>`
+const phase = () => `--phase:-${((Date.now() % 2230) / 1000).toFixed(2)}s`
+
+function agentDetail(a, isMain){
+  const pr = progress(a)
+  const s = session()
+  const does = isMain ? (s.request ? s.request.text : t('mainSub')) : (a.prompt || a.description)
+  const now = stateOf(a) === 'run' ? (a.currentTool || t('thinking')) : null
+  return `<div class="detail">
+    ${a.alert ? `<h4>${esc(t('alert'))}</h4><div class="warn">${esc(a.alert)}</div>` : ''}
+    <h4>${esc(t('does'))}</h4><div class="box">${esc(does)}</div>
+    ${now ? `<h4>${esc(t('action'))}</h4><div>${esc(now)}</div>` : ''}
+    <h4>${esc(t('part'))}</h4><div class="box">${esc(isMain ? t('allSteps') : (a.part || t('unknownPart')))}</div>
+    <h4>${esc(t('tasks'))}</h4>${(a.tasks && a.tasks.length) ? `<ul class="tasks">${a.tasks.map(x => `<li><span class="chk ${x.status==='completed'?'done':x.status==='in_progress'?'now':''}"></span>
+      <span>${esc(x.content)}</span><span class="stt">${esc(t(x.status==='completed'?'tDone':x.status==='in_progress'?'tNow':'tTodo'))}</span></li>`).join('')}</ul>` : ''}
+    ${pr.note ? `<div class="sub" style="margin-top:6px">${esc(t(pr.note))}</div>` : ''}</div>`
+}
+function agentCard(a, isMain, compact){
+  const st = stateOf(a), cls = CLS[st], pr = progress(a)
+  const key = sessionId + ':' + layout + ':' + a.id, o = offsets[key]
+  const open = sel === a.id
+  const sub = isMain ? t('mainSub') : [a.type, a.model].filter(Boolean).join(' · ')
+  const now = st === 'run' && !open ? (a.currentTool || t('thinking')) : st === 'alert' && !open ? a.alert : ''
+  return `<div class="card ${cls} ${st==='run'||st==='alert'?'run':''} ${open?'sel open':''} ${popId===a.id?'pop':''}" data-id="${esc(a.id)}"
+    style="${compact?'padding:10px 12px;':''}${o?`transform:translate(${o[0]}px,${o[1]}px);`:''}${phase()}">
+    <span class="badge">${esc(t(st))}</span>
+    <div class="head"><div class="ico">${isMain ? ICONS.main : kindIcon(a)}</div><div><div class="ttl">${esc(isMain ? t('mainAgent') : a.description)}</div><div class="sub">${esc(sub)}</div></div></div>
+    ${now ? `<div class="now">→ ${esc(now)}</div>` : ''}
+    ${bar(pr.p)}${open ? agentDetail(a, isMain) : ''}</div>`
+}
+function boxCard(n, compact){
+  const cls = n.kind === 'fin' ? CLS[n.st] : ''
+  const key = sessionId + ':' + layout + ':' + n.id, o = offsets[key], open = sel === n.id && n.body
+  return `<div class="card ${cls} ${open?'sel open':''} ${popId===n.id?'pop':''}" data-id="${n.id}" style="${compact?'padding:10px 12px;':''}${o?`transform:translate(${o[0]}px,${o[1]}px);`:''}">
+    <div class="head"><div class="ico">${ICONS[n.kind]}</div><div style="min-width:0"><div class="ttl">${esc(n.name)}</div><div class="sub" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${esc(n.sub)}</div></div></div>
+    ${open ? `<div class="detail"><h4>${esc(t(n.kind==='req'?'requestTitle':'finalTitle'))}</h4><div class="box">${esc(n.body)}</div></div>` : ''}</div>`
+}
+
+let pairs = []
+const LAYOUTS = {
+  A: n => {
+    const top = n.subs.filter(a => !a.parentId || a.parentId === MAIN || !n.subs.some(b => b.id === a.parentId))
+    const nested = n.subs.filter(a => !top.includes(a))
+    const cols = Math.min(4, Math.max(1, n.subs.length))
+    return [`<div style="display:flex;flex-direction:column;align-items:center;gap:44px">
+        <div style="width:300px">${boxCard(n.req)}</div><div style="width:360px">${agentCard(n.main, true)}</div>
+        ${n.subs.length ? `<div style="display:grid;grid-template-columns:repeat(${cols},250px);gap:30px 18px;align-items:start">${[...top, ...nested].map(a => agentCard(a)).join('')}</div>` : ''}
+        <div style="width:300px">${boxCard(n.fin)}</div></div>`,
+      [['req', MAIN], ...top.map(a => [MAIN, a.id]), ...nested.map(a => [a.parentId, a.id]), ...(n.subs.length ? top.map(a => [a.id, 'fin']) : [[MAIN, 'fin']])]]
+  },
+  B: n => [`<div style="display:grid;grid-template-columns:200px 240px 260px 200px;gap:46px;align-items:center">
+      <div>${boxCard(n.req,1)}</div><div>${agentCard(n.main,true,1)}</div>
+      <div style="display:flex;flex-direction:column;gap:16px">${n.subs.map(a => agentCard(a,false,1)).join('')}</div><div>${boxCard(n.fin,1)}</div></div>`,
+    [['req',MAIN,'h'], ...n.subs.map(a => [n.subs.some(b => b.id === a.parentId) ? a.parentId : MAIN, a.id, 'h']), ...(n.subs.length ? n.subs.map(a => [a.id,'fin','h']) : [[MAIN,'fin','h']])]],
+  C: n => [`<div style="display:grid;gap:10px;width:900px">
+      <div class="row sub" style="padding:0 4px;text-transform:uppercase;letter-spacing:.1em;font-size:10.5px"><span>${esc(t('agentCol'))}</span><span>${esc(t('part'))}</span><span>${esc(t('progressCol'))}</span></div>
+      ${[n.main, ...n.subs].map(a => `<div class="row"><div style="${a.id!==MAIN?'padding-left:26px;border-left:2px solid var(--line);margin-left:12px':''}">${agentCard(a, a.id===MAIN, 1)}</div>
+        <div class="sub">${esc(a.id===MAIN ? t('allSteps') : (a.part || '—'))}</div><div class="${CLS[stateOf(a)]}">${bar(progress(a).p)}</div></div>`).join('')}
+      <div class="sub" style="margin-top:6px">${esc(t('request'))} : « ${esc(n.req.sub)} » · ${esc(t('final'))} : ${esc(n.fin.sub)}</div></div>`, []],
+}
+
+let lastSig = ''
+function render(force){
+  const n = nodes()
+  const empty = document.getElementById('empty')
+  empty.hidden = !!n; empty.textContent = n ? '' : t('noSession')
+  if (!n){ world.innerHTML = ''; lastSig = ''; renderProject(null); renderChat(); return }
+  if (drag && drag.kind === 'card') return   // pas de redessin pendant qu'on déplace une bulle
+  const [html, p] = LAYOUTS[layout](n); pairs = p
+  const sig = html.replace(/--phase:-[\d.]+s/g, '') + layout + lang
+  if (force || sig !== lastSig){
+    lastSig = sig
+    world.innerHTML = `<svg class="links"></svg>${html}`
+    applyCam(); drawLinks()
+    // Cadrer une fois la mise en page et les polices posées
+    if (needFit){ needFit = false; fit(); setTimeout(fit, 300) }
   }
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-  ctx.fillStyle = '#0b0d12'
-  ctx.fillRect(0, 0, W, H)
-
-  const focus = drag && drag.kind === 'node' ? drag.node : hover
-  const near = focus ? neighbors.get(focus.id) || new Set() : null
-  const lit = n => !focus || n === focus || near.has(n.id)
-  const searchOn = !!query
-
-  ctx.setTransform(dpr * cam.k, 0, 0, dpr * cam.k, dpr * (W / 2 + cam.x), dpr * (H / 2 + cam.y))
-
-  // Liens
-  for (const l of links) {
-    const a = nodes.get(l.s), b = nodes.get(l.t)
-    const on = focus && (a === focus || b === focus)
-    ctx.globalAlpha = on ? 0.95 : focus ? 0.06 : searchOn ? 0.08 : (l.kind === 'agent' ? 0.45 : 0.22)
-    ctx.strokeStyle = on ? a.color : l.kind === 'agent' ? '#4a5263' : '#3a4150'
-    ctx.lineWidth = (on ? 1.8 : l.kind === 'agent' ? 1.4 : 0.8) * cfg.thick / Math.sqrt(cam.k)
-    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke()
-  }
-
-  // Nœuds
-  const pulse = (t % 1600) / 1600
-  const ordered = [...nodes.values()].sort((a, b) => (a.kind === 'agent') - (b.kind === 'agent'))
-  for (const n of ordered) {
-    const r = nodeR(n)
-    const dim = (focus && !lit(n)) || (searchOn && !matches(n))
-    ctx.globalAlpha = dim ? 0.12 : 1
-    const running = n.kind === 'agent' ? n.ref.state === 'running' : n.ref.endedAt === undefined
-    if (running && !dim) {
-      ctx.globalAlpha = 0.8 * (1 - pulse)
-      ctx.strokeStyle = n.color; ctx.lineWidth = 1.6 / cam.k
-      ctx.beginPath(); ctx.arc(n.x, n.y, r * (1 + pulse * 1.4) + 1 / cam.k, 0, Math.PI * 2); ctx.stroke()
-      ctx.globalAlpha = 1
-    }
-    if (n === focus) {
-      ctx.shadowColor = n.color; ctx.shadowBlur = 18
-    }
-    ctx.fillStyle = n.color
-    ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2); ctx.fill()
-    ctx.shadowBlur = 0
-    if (n === focus || bubbles.has(n.id) || (searchOn && matches(n) && query)) {
-      ctx.strokeStyle = n.color; ctx.lineWidth = 2 / cam.k
-      ctx.beginPath(); ctx.arc(n.x, n.y, r + 4 / cam.k, 0, Math.PI * 2); ctx.stroke()
-    }
-    if (n.kind === 'action' && n.ref.isError && !dim) {
-      ctx.strokeStyle = FAILED; ctx.lineWidth = 1.5 / cam.k
-      ctx.beginPath(); ctx.arc(n.x, n.y, r + 2 / cam.k, 0, Math.PI * 2); ctx.stroke()
-    }
-  }
-
-  // Libellés : comme dans Obsidian, ils apparaissent en zoomant
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-  ctx.textAlign = 'center'; ctx.textBaseline = 'top'
-  const actionFade = cfg.allLabels ? 1 : Math.max(0, Math.min(1, (cam.k - 0.9) / 0.6))
-  const agentFade = cfg.allLabels ? 1 : Math.max(0, Math.min(1, (cam.k - 0.06) / 0.08))
-  for (const n of ordered) {
-    const highlighted = n === focus || (focus && lit(n)) || bubbles.has(n.id) || (searchOn && matches(n))
-    let a = n.kind === 'agent' ? agentFade : actionFade
-    if (highlighted) a = 1
-    if ((focus && !lit(n)) || (searchOn && !matches(n))) a = Math.min(a, 0.1)
-    if (a <= 0.02) continue
-    const [sx, sy] = toScreen(n.x, n.y)
-    if (sx < -200 || sx > W + 200 || sy < -50 || sy > H + 50) continue
-    const r = nodeR(n) * cam.k
-    ctx.globalAlpha = a
-    ctx.font = n.kind === 'agent' ? '600 12.5px system-ui, sans-serif' : '11px system-ui, sans-serif'
-    ctx.fillStyle = n === focus ? '#ffffff' : n.kind === 'agent' ? '#e6e8ee' : '#9aa1b0'
-    ctx.fillText(clip(n.label, n.kind === 'agent' ? 40 : 30), sx, sy + r + 5)
-  }
-  ctx.globalAlpha = 1
-
-  drawBubbleLinks(ctx)
+  renderProject(n); renderChat()
 }
 
-// Bulles : elles suivent leur nœud (en 2D comme en 3D) ; un trait pointillé les relie à lui
-function nodeScreen(id) {
-  if (mode === '3d' && G) {
-    const o = n3.get(id)
-    if (!o || o.x === undefined) return null
-    const p = G.graph2ScreenCoords(o.x, o.y, o.z)
-    return [p.x, p.y]
-  }
-  const n = nodes.get(id)
-  return n ? toScreen(n.x, n.y) : null
-}
-function drawBubbleLinks(c) {
-  for (const [id, b] of bubbles) {
-    const p = nodeScreen(id)
-    if (p) { b.lastX = p[0]; b.lastY = p[1] }
-    placeBubble(b)
-    const n = nodes.get(id)
-    if (!p || !n) continue
-    const rect = b.el.getBoundingClientRect()
-    const cx = Math.max(rect.left, Math.min(b.lastX, rect.right))
-    const cy = Math.max(rect.top, Math.min(b.lastY, rect.bottom))
-    c.strokeStyle = n.color; c.globalAlpha = 0.6; c.lineWidth = 1.2
-    c.setLineDash([4, 4])
-    c.beginPath(); c.moveTo(b.lastX, b.lastY); c.lineTo(cx, cy); c.stroke()
-    c.setLineDash([]); c.globalAlpha = 1
-  }
+// ---------- Liens ----------
+function isLiveId(id){ const n = nodes(); if (!n) return false; const a = id === MAIN ? n.main : n.subs.find(x => x.id === id); return !!a && ['run','alert'].includes(stateOf(a)) }
+function drawLinks(){
+  const svg = world.querySelector('svg.links'); if (!svg) return
+  const wr = world.getBoundingClientRect(), k = cam.k
+  svg.setAttribute('width', world.offsetWidth); svg.setAttribute('height', world.offsetHeight)
+  const box = id => { const el = world.querySelector(`[data-id="${CSS.escape(id)}"]`); if (!el) return null; const r = el.getBoundingClientRect()
+    return { l:(r.left-wr.left)/k, t:(r.top-wr.top)/k, w:r.width/k, h:r.height/k } }
+  svg.innerHTML = pairs.map(([f, to, dir]) => {
+    const a = box(f), b = box(to); if (!a || !b) return ''
+    const cls = f !== 'req' && (isLiveId(f) || isLiveId(to)) ? 'live' : ''
+    if (dir === 'h'){ const x1=a.l+a.w, y1=a.t+a.h/2, x2=b.l, y2=b.t+b.h/2, mx=(x1+x2)/2; return `<path class="${cls}" d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}"/>` }
+    const x1=a.l+a.w/2, y1=a.t+a.h, x2=b.l+b.w/2, y2=b.t, my=(y1+y2)/2
+    return `<path class="${cls}" d="M${x1},${y1} L${x1},${my} L${x2},${my} L${x2},${y2}"/>`
+  }).join('')
 }
 
-function loop(t) {
-  if (mode === '2d') {
-    tick()
-    draw(t)
-  } else {
-    updateGlows(t)
-    octx.setTransform(dpr, 0, 0, dpr, 0, 0)
-    octx.clearRect(0, 0, W, H)
-    drawBubbleLinks(octx)
-  }
-  requestAnimationFrame(loop)
+// ---------- Zoom, déplacement du plan, Ajuster ----------
+function applyCam(){ world.style.transform = `translate(${cam.x}px,${cam.y}px) scale(${cam.k})`; document.getElementById('zoom-val').textContent = Math.round(cam.k*100) + ' %' }
+function zoomAt(f, sx, sy){ const k = Math.min(2, Math.max(0.25, cam.k*f)); cam.x = sx - (sx-cam.x)*(k/cam.k); cam.y = sy - (sy-cam.y)*(k/cam.k); cam.k = k; applyCam() }
+function fit(){
+  const r = stage.getBoundingClientRect(), w = world.offsetWidth, h = world.offsetHeight; if (!w || !h) return
+  const k = Math.min(1.2, Math.max(0.25, Math.min((r.width-40)/w, (r.height-80)/h)))
+  cam.k = k; cam.x = (r.width - w*k)/2; cam.y = Math.max(44, (r.height - h*k)/2); applyCam()
+}
+stage.addEventListener('wheel', e => { e.preventDefault(); const r = stage.getBoundingClientRect(); zoomAt(Math.exp(-e.deltaY*(e.ctrlKey?0.01:0.0015)), e.clientX-r.left, e.clientY-r.top) }, { passive:false })
+document.getElementById('zoom-in').onclick = () => { const r = stage.getBoundingClientRect(); zoomAt(1.2, r.width/2, r.height/2) }
+document.getElementById('zoom-out').onclick = () => { const r = stage.getBoundingClientRect(); zoomAt(1/1.2, r.width/2, r.height/2) }
+document.getElementById('fit').onclick = fit
+
+// ---------- Glisser une bulle ou le plan ; clic = ouvrir et choisir l'agent du chat ----------
+let drag = null
+stage.addEventListener('pointerdown', e => {
+  if (e.button !== 0 || e.target.closest('.hud, .legend, .topleft, .detail')) return
+  const c = e.target.closest('.card')
+  if (c){ const key = sessionId + ':' + layout + ':' + c.dataset.id, o = offsets[key] || [0,0]; drag = { kind:'card', c, key, x:e.clientX, y:e.clientY, ox:o[0], oy:o[1], moved:false } }
+  else drag = { kind:'pan', x:e.clientX, y:e.clientY, ox:cam.x, oy:cam.y, moved:false }
+  stage.setPointerCapture(e.pointerId)
+})
+stage.addEventListener('pointermove', e => {
+  if (!drag) return
+  const dx = e.clientX-drag.x, dy = e.clientY-drag.y
+  if (!drag.moved && Math.abs(dx)+Math.abs(dy) < 5) return
+  drag.moved = true
+  if (drag.kind === 'pan'){ stage.classList.add('panning'); cam.x = drag.ox+dx; cam.y = drag.oy+dy; applyCam(); return }
+  drag.c.classList.add('dragging')
+  const nx = drag.ox + dx/cam.k, ny = drag.oy + dy/cam.k
+  offsets[drag.key] = [nx, ny]; drag.c.style.transform = `translate(${nx}px,${ny}px)`; drawLinks()
+})
+stage.addEventListener('pointerup', () => {
+  if (!drag) return
+  stage.classList.remove('panning')
+  const d = drag; drag = null
+  if (d.moved){ if (d.kind === 'card'){ d.c.classList.remove('dragging'); store.set('offsets', offsets); render(true) } return }
+  if (d.kind === 'card'){ const id = d.c.dataset.id; sel = sel === id ? null : id; popId = id; render(true); popId = null }
+})
+document.getElementById('reset').onclick = () => {
+  const prefix = sessionId + ':' + layout + ':'
+  Object.keys(offsets).filter(k => k.startsWith(prefix)).forEach(k => delete offsets[k]); store.set('offsets', offsets)
+  world.querySelectorAll('.card').forEach(c => c.style.transform = '')
+  const t0 = performance.now(); const follow = () => { drawLinks(); if (performance.now()-t0 < 320) requestAnimationFrame(follow); else render(true) }; follow()
 }
 
-// ---------- Vue 3D (three.js + 3d-force-graph, chargés seulement au passage en 3D) ----------
-const LIB_3D = 'https://cdn.jsdelivr.net/npm/3d-force-graph@1.77.0/dist/3d-force-graph.min.js'
-const LIB_3D_SRI = 'sha384-LPDOi9GJtMLOTUwn16B77nCwZUN+OyFozMjJddWwf7EXi7Bzog8ZaclbVm0bay3e'
-const HELP_2D = '· molette : zoom · glisser : déplacer · clic : détail'
-const HELP_3D = '· glisser : tourner · clic droit : déplacer · molette : zoom · clic : détail'
-const g3dEl = document.getElementById('g3d')
-const ov = document.getElementById('ov')
-const octx = ov.getContext('2d')
-ov.width = canvas.width; ov.height = canvas.height
-let mode = cfg.mode === '3d' ? '3d' : '2d'
-let G = null, THREE = null, glowTexture = null, SpriteText = null, loading3D = null
-let hover3 = null, litIds = null, sig3 = '', fitted3D = false
-/** Nœuds de la scène 3D par id : le même objet est gardé d'une mise à jour à l'autre, pour garder sa position */
-const n3 = new Map()
-
-const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
-function mix(hex, to, t) {
-  const a = parseInt(hex.slice(1), 16), b = parseInt(to.slice(1), 16)
-  const ch = (x, s) => (x >> s) & 255
-  const m = s => Math.round(ch(a, s) + (ch(b, s) - ch(a, s)) * t)
-  return '#' + ((1 << 24) | (m(16) << 16) | (m(8) << 8) | m(0)).toString(16).slice(1)
-}
-const endNode = (l, key) => (typeof l[key] === 'object' ? l[key] : n3.get(l[key]))
-const isRunning = o => !!o && (o.kind === 'action' ? o.ref.endedAt === undefined : o.ref.state === 'running')
-
-function loadScript(src, integrity) {
-  return new Promise((resolve, reject) => {
-    const el = document.createElement('script')
-    el.src = src
-    el.integrity = integrity
-    el.crossOrigin = 'anonymous'
-    el.onload = resolve
-    el.onerror = () => reject(new Error('Chargement impossible : ' + src))
-    document.head.appendChild(el)
-  })
+// ---------- Progression du projet ----------
+function renderProject(n){
+  const el = document.getElementById('proj')
+  const steps = n ? (n.main.tasks || []) : []
+  const done = steps.filter(x => x.status === 'completed').length
+  const p = steps.length ? Math.round(done / steps.length * 100) : null
+  const col = s => s === 'completed' ? 'var(--s-done)' : s === 'in_progress' ? 'var(--s-run)' : 'var(--idle)'
+  el.title = steps.map(x => `${x.content} · ${t(x.status==='completed'?'tDone':x.status==='in_progress'?'tNow':'tTodo')}`).join('\n')
+  el.innerHTML = `<span class="lbl">${esc(t('project'))}</span>${bar(p)}<span class="dots">${steps.map(x => `<i title="${esc(x.content)}" style="background:${col(x.status)}"></i>`).join('')}</span>`
 }
 
-// Couleurs : au survol, le nœud et ses voisins gardent leur couleur, le reste s'efface dans le fond
-function color3(o) {
-  const dim = (litIds && !litIds.has(o.id)) || (query && !matches(o))
-  if (dim) return mix(o.color, '#0b0d12', 0.8)
-  return o === hover3 ? mix(o.color, '#ffffff', 0.3) : o.color
+// ---------- Chat ----------
+function target(){ const n = nodes(); if (!n) return null; const id = sel && (sel === MAIN || n.subs.some(a => a.id === sel)) ? sel : MAIN
+  return { id, name: id === MAIN ? t('mainAgent') : n.subs.find(a => a.id === id).description } }
+let lastChatSig = ''
+function renderChat(){
+  const tg = target(), s = session()
+  document.getElementById('who').textContent = tg ? tg.name : '—'
+  const box = document.getElementById('msgs')
+  const msgs = tg && s ? (s.chat || []).filter(m => m.agentId === tg.id) : []
+  pending = pending.filter(p => !(s && (s.chat || []).some(m => m.id === p.id)))
+  const all = [...msgs, ...pending.filter(p => tg && p.agentId === tg.id)]
+  const sig = JSON.stringify(all) + lang
+  if (sig === lastChatSig) return
+  lastChatSig = sig
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 30
+  box.innerHTML = all.length ? all.map(m => `<div class="m ${m.from==='user'?'u':'a'} ${m.status==='failed'?'failed':''}">${esc(m.text)}${m.from==='user'
+    ? `<span class="st">${esc(t(m.status==='failed'?'mFailed':m.status==='sent'?'mSent':m.status==='queued'?'mQueued':'mSending'))}${m.reason?' · '+esc(m.reason.slice(0,140)):''}</span>` : ''}</div>`).join('')
+    : `<div class="none">${esc(t('noMsgs'))}</div>`
+  if (atBottom) box.scrollTop = box.scrollHeight
 }
-function linkColor3(l) {
-  const s = endNode(l, 'source'), t = endNode(l, 'target')
-  if (hover3 && (s === hover3 || t === hover3)) return s.color
-  if (litIds || query) return '#161a22'
-  return l.kind === 'agent' ? '#5a6478' : '#353c4b'
-}
-function linkWidth3(l) {
-  const s = endNode(l, 'source'), t = endNode(l, 'target')
-  if (hover3 && (s === hover3 || t === hover3)) return 1.3 * cfg.thick
-  return l.kind === 'agent' ? 0.7 * cfg.thick : 0
-}
-function tooltip3(o) {
-  const r = o.ref
-  if (o.kind === 'agent') {
-    const what = r.state === 'running' ? (r.currentTool || 'réflexion…') : (STATE_LABEL[r.state] || r.state)
-    return `<b>${esc(r.description || r.type)}</b><br><span style="color:#8b93a3">${esc(r.type)} · ${esc(what)}</span>`
-  }
-  return `<b>${esc(shortTool(r.tool))}</b><br><span style="color:#8b93a3">${esc(clip(r.detail || '(sans argument)', 90))}</span>`
-}
-// Libellés en texte flottant : toujours pour les agents, pour les actions si l'option est cochée
-function label3(o) {
-  if (!SpriteText || (o.kind !== 'agent' && !cfg.allLabels)) return null
-  const isAgent = o.kind === 'agent'
-  const sprite = new SpriteText(clip(o.label, isAgent ? 40 : 28), isAgent ? 9 : 4, isAgent ? '#d9dce4' : '#8f97a6')
-  sprite.fontFace = 'system-ui, sans-serif'
-  sprite.fontWeight = isAgent ? '600' : '400'
-  sprite.material.depthWrite = false
-  const r = Math.cbrt(o.val) * 4 * cfg.size
-  sprite.position.set(0, -(r + (isAgent ? 9 : 5)), 0)
-  return sprite
-}
-
-// Halo lumineux autour de chaque nœud (un sprite en dégradé, mélangé en additif) : la « lueur » sans post-traitement
-function makeGlowTexture() {
-  const c = document.createElement('canvas')
-  c.width = c.height = 128
-  const g = c.getContext('2d')
-  const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64)
-  grd.addColorStop(0, 'rgba(255,255,255,0.85)')
-  grd.addColorStop(0.22, 'rgba(255,255,255,0.4)')
-  grd.addColorStop(0.55, 'rgba(255,255,255,0.08)')
-  grd.addColorStop(1, 'rgba(255,255,255,0)')
-  g.fillStyle = grd
-  g.fillRect(0, 0, 128, 128)
-  return new THREE.CanvasTexture(c)
-}
-function glowOpacity(o) {
-  if ((litIds && !litIds.has(o.id)) || (query && !matches(o))) return 0.04
-  if (o === hover3) return 0.95
-  return o.kind === 'agent' ? 0.6 : 0.45
-}
-function nodeObject3(o) {
-  const group = new THREE.Group()
-  const r = Math.cbrt(o.val) * 4 * cfg.size
-  const glow = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: glowTexture,
-    color: o.color,
-    transparent: true,
-    opacity: glowOpacity(o),
-    blending: THREE.AdditiveBlending,
-    depthWrite: false,
-  }))
-  o.__glowBase = r * (o.kind === 'agent' ? 4.2 : 5)
-  glow.scale.set(o.__glowBase, o.__glowBase, 1)
-  glow.visible = !!cfg.bloom
-  o.__glow = glow
-  group.add(glow)
-  const label = label3(o)
-  if (label) group.add(label)
-  return group
-}
-// Met à jour les halos sans recréer les objets ; ceux des nœuds actifs pulsent
-function updateGlows(t) {
-  for (const o of n3.values()) {
-    const glow = o.__glow
-    if (!glow) continue
-    glow.visible = !!cfg.bloom
-    glow.material.color.set(o.color)
-    glow.material.opacity = glowOpacity(o)
-    const s = o.__glowBase * (isRunning(o) ? 1 + 0.35 * (0.5 + 0.5 * Math.sin(t / 240)) : 1)
-    glow.scale.set(s, s, 1)
-  }
-}
-
-function ensure3D() {
-  if (G) return Promise.resolve()
-  if (loading3D) return loading3D
-  loading3D = (async () => {
-    await loadScript(LIB_3D, LIB_3D_SRI)
-    THREE = await import('three')
-    glowTexture = makeGlowTexture()
-    SpriteText = (await import('three-spritetext')).default
-    G = window.ForceGraph3D({ controlType: 'orbit' })(g3dEl)
-      .width(W).height(H)
-      .backgroundColor('#0b0d12')
-      .showNavInfo(false)
-      .nodeId('id')
-      .nodeVal(o => o.val)
-      .nodeRelSize(4 * cfg.size)
-      .nodeResolution(20)
-      .nodeOpacity(0.95)
-      .nodeColor(color3)
-      .nodeLabel(tooltip3)
-      .nodeThreeObjectExtend(true)
-      .nodeThreeObject(nodeObject3)
-      .linkColor(linkColor3)
-      .linkWidth(linkWidth3)
-      .linkOpacity(0.5)
-      // Des particules circulent sur le lien d'un agent ou d'une action en cours
-      .linkDirectionalParticles(l => (isRunning(endNode(l, 'source')) ? 3 : 0))
-      .linkDirectionalParticleWidth(1.8)
-      .linkDirectionalParticleSpeed(0.011)
-      .linkDirectionalParticleColor(l => endNode(l, 'source')?.color || '#ffffff')
-      .onNodeHover(o => {
-        hover3 = o || null
-        g3dEl.style.cursor = o ? 'pointer' : ''
-        restyle3D()
-      })
-      .onNodeClick(o => toggleBubble(o.id))
-      .onNodeDragEnd(o => { o.fx = o.fy = o.fz = undefined })
-    apply3DForces()
-    apply3DLook()
-  })()
-  loading3D.catch(() => { loading3D = null })
-  return loading3D
-}
-
-// Force 3D qui écarte les racines de session les unes des autres
-function sessionSeparation() {
-  let all = []
-  const force = alpha => {
-    const roots = all.filter(o => o.kind === 'agent' && o.ref && o.ref.isMain)
-    const gap = cfg.dist * 5
-    for (let i = 0; i < roots.length; i++) {
-      for (let j = i + 1; j < roots.length; j++) {
-        const a = roots[i], b = roots[j]
-        const dx = b.x - a.x, dy = b.y - a.y, dz = (b.z || 0) - (a.z || 0)
-        const d = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1
-        if (d >= gap) continue
-        const k = (gap - d) / d * 0.08 * alpha
-        a.vx -= dx * k; a.vy -= dy * k; a.vz -= dz * k
-        b.vx += dx * k; b.vy += dy * k; b.vz += dz * k
-      }
-    }
-  }
-  force.initialize = nodesIn => { all = nodesIn }
-  return force
-}
-
-function apply3DForces() {
-  if (!G) return
-  if (!G.d3Force('sessions')) G.d3Force('sessions', sessionSeparation())
-  G.d3Force('charge').strength(-cfg.repel * 7)
-  // Sous-agents loin de leur parent, actions en grappe serrée autour de leur agent
-  G.d3Force('link')
-    .distance(l => (l.kind === 'agent' ? cfg.dist * 3 : cfg.dist * 0.35))
-    .strength(l => (l.kind === 'agent' ? 0.15 + cfg.link * 0.5 : 0.05 + cfg.link * 1.2))
-  const center = G.d3Force('center')
-  if (center && typeof center.strength === 'function') center.strength(Math.max(0.01, cfg.center))
-  if (G.nodeRelSize() !== 4 * cfg.size) {
-    G.nodeRelSize(4 * cfg.size)
-    G.nodeThreeObject(G.nodeThreeObject())
-  }
-  G.linkWidth(G.linkWidth())
-  G.d3ReheatSimulation()
-}
-function apply3DLook() {
-  if (!G) return
-  const controls = G.controls()
-  controls.autoRotate = !!cfg.autoRotate
-  controls.autoRotateSpeed = 0.8
-}
-function restyle3D() {
-  if (!G) return
-  litIds = hover3 ? new Set([hover3.id, ...(neighbors.get(hover3.id) || [])]) : null
-  G.nodeColor(G.nodeColor())
-    .linkColor(G.linkColor())
-    .linkWidth(G.linkWidth())
-    .linkDirectionalParticles(G.linkDirectionalParticles())
-}
-
-// Reporte les nœuds et liens calculés (les mêmes qu'en 2D) dans la scène 3D
-function sync3D() {
-  if (!G) return
-  for (const n of nodes.values()) {
-    let o = n3.get(n.id)
-    if (!o) {
-      const link = links.find(l => l.s === n.id)
-      const parent = link && n3.get(link.t)
-      o = { id: n.id }
-      if (parent && parent.x !== undefined) {
-        o.x = parent.x + (Math.random() - 0.5) * 30
-        o.y = parent.y + (Math.random() - 0.5) * 30
-        o.z = parent.z + (Math.random() - 0.5) * 30
-      }
-      n3.set(n.id, o)
-    }
-    o.kind = n.kind
-    o.ref = n.ref
-    o.color = n.color
-    o.label = n.label
-    const degree = neighbors.get(n.id)?.size || 0
-    o.val = n.kind === 'agent' ? (n.ref.isMain ? 16 : 6) + Math.min(20, degree * 0.5) : 1
-  }
-  for (const id of [...n3.keys()]) if (!nodes.has(id)) n3.delete(id)
-  const sig = [...n3.keys()].join('|') + '#' + links.length
-  if (hover3 && !n3.has(hover3.id)) hover3 = null
-  if (sig !== sig3) {
-    sig3 = sig
-    litIds = hover3 ? new Set([hover3.id, ...(neighbors.get(hover3.id) || [])]) : null
-    G.graphData({ nodes: [...n3.values()], links: links.map(l => ({ source: l.s, target: l.t, kind: l.kind })) })
-  } else {
-    restyle3D()
-  }
-  // Premier affichage : on cadre une fois que le graphe s'est un peu déployé
-  if (!fitted3D && n3.size) {
-    fitted3D = true
-    setTimeout(() => G && G.zoomToFit(800, 60), 1500)
-  }
-}
-
-async function setMode(next) {
-  mode = next
-  cfg.mode = next
-  saveCfg()
-  document.getElementById('m2d').classList.toggle('on', next === '2d')
-  document.getElementById('m3d').classList.toggle('on', next === '3d')
-  document.getElementById('help').textContent = next === '3d' ? HELP_3D : HELP_2D
-  if (next === '2d') {
-    if (G) G.pauseAnimation()
-    canvas.style.display = ''
-    g3dEl.style.display = 'none'
-    ov.style.display = 'none'
-    return
-  }
-  canvas.style.display = 'none'
-  g3dEl.style.display = 'block'
-  ov.style.display = 'block'
+document.getElementById('form').onsubmit = async e => {
+  e.preventDefault()
+  const input = document.getElementById('input'), err = document.getElementById('err'), text = input.value.trim(), tg = target()
+  err.textContent = ''
+  if (!text){ err.textContent = t('emptyMsg'); return }
+  if (!tg) return
   try {
-    if (!G) statusText.textContent = 'Chargement de la 3D…'
-    await ensure3D()
-    if (mode !== '3d') return
-    statusText.textContent = connected ? 'En direct' : 'Reconnexion…'
-    G.resumeAnimation()
-    sync3D()
-  } catch (err) {
-    console.error(err)
-    statusText.textContent = 'Impossible de charger la 3D (Internet ?) : retour en 2D'
-    setMode('2d')
-  }
+    const res = await fetch('/chat', { method:'POST', headers:{ 'content-type':'application/json; charset=utf-8', 'x-agent-viewer':'1' },
+      body: JSON.stringify({ sessionId, agentId: tg.id, text }) })
+    if (!res.ok) throw new Error(await res.text())
+    const { id } = await res.json()
+    pending.push({ id, agentId: tg.id, from:'user', text, at: Date.now() })
+    input.value = ''; renderChat()
+  } catch (x){ err.textContent = t('sendFail') + (x && x.message || x) }
 }
+document.getElementById('input').addEventListener('input', () => { document.getElementById('err').textContent = '' })
 
-window.onResize3D = () => {
-  ov.width = canvas.width
-  ov.height = canvas.height
-  if (G) G.width(W).height(H)
+// ---------- Sessions ----------
+function renderSessions(){
+  const box = document.getElementById('session'), list = payload.sessions
+  if (!list.some(s => s.id === sessionId)){
+    const live = list.filter(s => s.isLive).sort((a, b) => b.lastSeen - a.lastSeen)
+    sessionId = (live[0] || list[0] || {}).id || null; needFit = true; sel = null
+  }
+  const html = list.map(s => `<option value="${esc(s.id)}" ${s.id===sessionId?'selected':''}>${s.isLive?'● ':'○ '}${esc(s.title || (s.cwd||'').split(/[\\/]/).pop() || s.id.slice(0,8))}${s.isLive?'':' ('+esc(t('inactive'))+')'}</option>`).join('')
+  if (box.dataset.html !== html){ box.innerHTML = html; box.dataset.html = html }
+  box.style.display = list.length ? '' : 'none'
+  const s = session(); document.getElementById('live').classList.toggle('on', !!(s && s.isLive))
 }
+document.getElementById('session').onchange = e => { sessionId = e.target.value; store.set('session', sessionId); sel = null; needFit = true; render(true) }
 
-// ---------- Réglages : branchement des contrôles ----------
-function bindControls() {
-  for (const key of ['center', 'repel', 'link', 'dist', 'size', 'thick']) {
-    const input = document.getElementById(key), out = document.getElementById('o-' + key)
-    input.value = cfg[key]; out.textContent = cfg[key]
-    input.oninput = () => {
-      cfg[key] = Number(input.value); out.textContent = input.value; saveCfg()
-      alpha = Math.max(alpha, 0.5)
-      apply3DForces()
-    }
-  }
-  for (const key of ['showActions', 'hideDone', 'allLabels']) {
-    const input = document.getElementById(key)
-    input.checked = cfg[key]
-    input.onchange = () => {
-      cfg[key] = input.checked; saveCfg(); rebuild()
-      if (key === 'allLabels' && G) G.nodeThreeObject(G.nodeThreeObject())
-    }
-  }
-  for (const key of ['autoRotate', 'bloom']) {
-    const input = document.getElementById(key)
-    input.checked = cfg[key]
-    input.onchange = () => { cfg[key] = input.checked; saveCfg(); apply3DLook() }
-  }
-  document.getElementById('m2d').onclick = () => setMode('2d')
-  document.getElementById('m3d').onclick = () => setMode('3d')
-  document.getElementById('fit').onclick = () => fit()
-  document.getElementById('closeAll').onclick = closeAllBubbles
-  document.getElementById('reset').onclick = () => {
-    const hidden = cfg.hiddenCats
-    cfg = { ...DEFAULTS, hiddenCats: hidden, mode }; saveCfg(); bindControls(); rebuild(); alpha = 1; apply3DForces(); apply3DLook()
-  }
+// ---------- Menu Réglages ----------
+const menu = document.getElementById('menu'), gear = document.getElementById('gear')
+gear.onclick = () => { menu.classList.toggle('open'); gear.classList.toggle('on', menu.classList.contains('open')) }
+document.addEventListener('pointerdown', e => { if (!e.target.closest('#menu, #gear')){ menu.classList.remove('open'); gear.classList.remove('on') } })
+function syncMenu(){
+  document.querySelectorAll('[data-opt="layout"] button').forEach(b => b.classList.toggle('on', b.dataset.val === layout))
+  document.querySelectorAll('[data-opt="theme"] button').forEach(b => b.classList.toggle('on', b.dataset.val === theme))
+  document.querySelectorAll('[data-opt="lang"] button').forEach(b => b.classList.toggle('on', b.dataset.val === lang))
+  document.documentElement.classList.toggle('light', theme === 'clair')
 }
-bindControls()
+document.querySelectorAll('[data-opt="layout"] button').forEach(b => b.onclick = () => { layout = b.dataset.val; store.set('layout', layout); syncMenu(); needFit = true; render(true) })
+document.querySelectorAll('[data-opt="theme"] button').forEach(b => b.onclick = () => { theme = b.dataset.val; store.set('theme', theme); syncMenu() })
+document.querySelectorAll('[data-opt="lang"] button').forEach(b => b.onclick = () => { lang = b.dataset.val; store.set('lang', lang); syncMenu(); applyTexts(); document.getElementById('session').dataset.html = ''; renderSessions(); lastChatSig = ''; render(true); setConn() })
+
+// ---------- Agrandir le chat ----------
+const chatEl = document.getElementById('chat'), grip = document.getElementById('grip')
+function setChatHeight(h){ if (h == null){ chatEl.style.height = ''; chatEl.classList.remove('sized'); return }
+  chatEl.style.height = Math.round(Math.min(window.innerHeight*0.75, Math.max(150, h))) + 'px'; chatEl.classList.add('sized') }
+setChatHeight(store.get('chatH', null))
+let rs = null
+grip.addEventListener('pointerdown', e => { rs = { y:e.clientY, h:chatEl.offsetHeight }; grip.setPointerCapture(e.pointerId); chatEl.classList.add('resizing') })
+grip.addEventListener('pointermove', e => { if (!rs) return; setChatHeight(rs.h - (e.clientY - rs.y)); drawLinks() })
+grip.addEventListener('pointerup', () => { if (!rs) return; rs = null; chatEl.classList.remove('resizing'); store.set('chatH', chatEl.classList.contains('sized') ? chatEl.offsetHeight : null) })
+grip.addEventListener('dblclick', () => { setChatHeight(null); store.set('chatH', null) })
 
 // ---------- Flux en direct ----------
-let first = true
-let connected = false
-const statusEl = document.getElementById('status'), statusText = document.getElementById('status-text')
-function connect() {
+function setConn(){ document.getElementById('conn').textContent = connected ? t('live') : t('reconnect') }
+function connect(){
   const es = new EventSource('/events')
-  es.onopen = () => { connected = true; statusEl.classList.add('ok'); statusText.textContent = 'En direct' }
-  es.onmessage = ev => {
-    try { lastPayload = JSON.parse(ev.data) } catch { return }
-    raw = flatten(lastPayload)
-    renderSessions()
-    receivedAt = Date.now()
-    rebuild()
-    if (first && nodes.size) {
-      first = false
-      for (let i = 0; i < 160; i++) tick()   // laisse le graphe se poser avant de le cadrer
-      fit2D(false)
-    }
-  }
-  es.onerror = () => { connected = false; statusEl.classList.remove('ok'); statusText.textContent = 'Reconnexion…' }
+  es.onopen = () => { connected = true; setConn() }
+  es.onmessage = ev => { try { payload = JSON.parse(ev.data) } catch { return } if (!Array.isArray(payload.sessions)) payload.sessions = []; renderSessions(); render() }
+  es.onerror = () => { connected = false; setConn() }
 }
-connect()
-requestAnimationFrame(loop)
-setMode(mode)
+window.addEventListener('resize', drawLinks)
+applyTexts(); syncMenu(); setConn(); render(true); connect()
 </script>
 </body>
 </html>

@@ -15,16 +15,18 @@
 import http from 'node:http'
 import { spawn } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 
 const APP = 'agent-viewer-hub'
-const VERSION = 2
+const VERSION = 4
 const FIRST_PORT = 47321
 const LAST_PORT = 47340
 const IDLE_MS = 15 * 60 * 1000
 const LIVE_MS = 70 * 1000
 const FORGET_MS = 30 * 60 * 1000
 const MAX_BODY = 8 * 1024 * 1024
+const MAX_CHAT = 4000
 
 // ---------- Recherche du hub ----------
 
@@ -37,7 +39,8 @@ function hubInfo(port) {
       res.on('end', () => {
         try {
           const info = JSON.parse(body)
-          resolve(info && info.app === APP ? info : null)
+          // Un hub d'une version plus ancienne ne compte pas : on en démarre un à jour à côté
+          resolve(info && info.app === APP && (info.version || 0) >= VERSION ? info : null)
         } catch {
           resolve(null)
         }
@@ -86,6 +89,8 @@ function hub() {
   /** id de session -> { id, title, cwd, agents, actions, lastSeen, ended } */
   const sessions = new Map()
   const clients = new Set()
+  /** id de session -> messages écrits dans la page, en attente que la session les relève */
+  const inboxes = new Map()
   let lastActivity = Date.now()
   let port = 0
 
@@ -169,6 +174,9 @@ function hub() {
           cwd: typeof s.cwd === 'string' ? s.cwd : '',
           agents: body.agents,
           actions: body.actions,
+          request: body.request && typeof body.request === 'object' ? body.request : null,
+          chat: Array.isArray(body.chat) ? body.chat.slice(-200) : [],
+          final: body.final && typeof body.final === 'object' ? body.final : null,
           lastSeen: Date.now(),
           ended: false,
         })
@@ -176,6 +184,29 @@ function hub() {
         broadcast()
         send(res, 204)
       })
+    }
+    // La page envoie un message à un agent : il attend dans la boîte de la session
+    if (req.method === 'POST' && pathname === '/chat') {
+      if (!isAllowedPost(req)) return send(res, 403, 'Refusé')
+      return readJson(req, res, body => {
+        const { sessionId, agentId, text } = body || {}
+        if (typeof sessionId !== 'string' || typeof agentId !== 'string' || typeof text !== 'string' || !text.trim()) return send(res, 400, 'Message invalide')
+        if (!sessions.has(sessionId)) return send(res, 404, 'Session inconnue')
+        if (text.length > MAX_CHAT) return send(res, 413, 'Message trop long')
+        const list = inboxes.get(sessionId) || []
+        const msg = { id: randomUUID(), agentId, text: text.trim(), at: Date.now() }
+        list.push(msg)
+        inboxes.set(sessionId, list.slice(-50))
+        send(res, 200, JSON.stringify({ id: msg.id }), 'application/json')
+      })
+    }
+    // La session relève ses messages (et seulement elle : en-tête exigé)
+    if (req.method === 'GET' && pathname === '/inbox') {
+      if (req.headers['x-agent-viewer'] !== '1') return send(res, 403, 'Refusé')
+      const sessionId = new URL(req.url || '/', 'http://127.0.0.1').searchParams.get('session') || ''
+      const list = inboxes.get(sessionId) || []
+      inboxes.delete(sessionId)
+      return send(res, 200, JSON.stringify(list), 'application/json')
     }
     if (req.method === 'POST' && pathname === '/end') {
       if (!isAllowedPost(req)) return send(res, 403, 'Refusé')

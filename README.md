@@ -4,7 +4,7 @@ Des mods pour Claude Code qui améliorent l'interface.
 
 | Mod | Ce qu'il fait |
 | --- | --- |
-| [agent-viewer](agent-viewer/) | Montre en direct quel agent fait quelle tâche : un panneau « Agents » à côté du chat, et une vue interactive façon Obsidian (2D ou 3D) qui regroupe toutes tes sessions, avec zoom, déplacement, bulles de détail et couleurs par type d'action. |
+| [agent-viewer](agent-viewer/) | Montre en direct, en organigramme, quel agent fait quoi : état en couleur, tâches et % réels, chat avec chaque agent, toutes tes sessions. Page locale, sans Internet. |
 | [turn-stats](turn-stats/) | Un bandeau au-dessus du prompt avec la durée, les outils et les tokens du dernier tour (et de ses sous-agents). |
 
 ## Installation
@@ -37,6 +37,5 @@ Add marketplace avec `mblcfw/claude-mods`, puis Add plugin.
 ## Prérequis
 
 - **agent-viewer** : la vue interactive tourne sur un petit serveur local lancé par le mod, il faut donc
-  `node` dans le PATH. La vue 3D télécharge ses bibliothèques (three.js, 3d-force-graph) depuis
-  cdn.jsdelivr.net au premier passage en 3D ; la 2D fonctionne hors ligne.
+  `node` dans le PATH. La page fonctionne hors ligne.
 - **turn-stats** : rien de particulier.

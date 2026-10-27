@@ -1,6 +1,6 @@
 {
   "name": "agent-viewer",
-  "version": "0.2.0",
-  "description": "Voir en direct quel agent fait quelle tâche : panneau, et vue interactive 2D / 3D façon Obsidian.",
+  "version": "0.3.0",
+  "description": "Voir en direct quel agent fait quoi : organigramme des agents, état en couleur, tâches et % réels, chat avec chaque agent. / Live org chart of your agents: color-coded state, real task progress, chat with each agent.",
   "types": "./types/index.d.ts"
 }
