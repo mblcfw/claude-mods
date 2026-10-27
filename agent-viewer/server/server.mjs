@@ -19,7 +19,7 @@ import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 
 const APP = 'agent-viewer-hub'
-const VERSION = 4
+const VERSION = 5
 const FIRST_PORT = 47321
 const LAST_PORT = 47340
 const IDLE_MS = 15 * 60 * 1000
@@ -27,6 +27,15 @@ const LIVE_MS = 70 * 1000
 const FORGET_MS = 30 * 60 * 1000
 const MAX_BODY = 8 * 1024 * 1024
 const MAX_CHAT = 4000
+// Fichiers servis tels quels depuis web/ (une liste fermée : rien d'autre du disque n'est lisible)
+const STATIC = {
+  '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json; charset=utf-8'],
+  '/sw.js': ['sw.js', 'text/javascript; charset=utf-8'],
+  '/icon.svg': ['icon.svg', 'image/svg+xml'],
+  '/icon-192.png': ['icon-192.png', 'image/png'],
+  '/icon-512.png': ['icon-512.png', 'image/png'],
+  '/icon-maskable-512.png': ['icon-maskable-512.png', 'image/png'],
+}
 
 // ---------- Recherche du hub ----------
 
@@ -146,6 +155,15 @@ function hub() {
 
     if (req.method === 'GET' && pathname === '/hub-info') {
       return send(res, 200, JSON.stringify({ app: APP, version: VERSION, sessions: sessions.size }), 'application/json')
+    }
+    // Fichiers de l'appli installable : manifeste, service worker, icônes
+    if (req.method === 'GET' && STATIC[pathname]) {
+      const [file, type] = STATIC[pathname]
+      try {
+        return send(res, 200, await readFile(new URL('../web/' + file, import.meta.url)), type)
+      } catch {
+        return send(res, 404, 'Introuvable')
+      }
     }
     if (req.method === 'GET' && (pathname === '/' || pathname === '/index.html')) {
       try {

@@ -4,7 +4,7 @@ Des mods pour Claude Code qui améliorent l'interface.
 
 | Mod | Ce qu'il fait |
 | --- | --- |
-| [agent-viewer](agent-viewer/) | Montre en direct, en organigramme, quel agent fait quoi : état en couleur, tâches et % réels, chat avec chaque agent, toutes tes sessions. Page locale, sans Internet. |
+| [agent-viewer](agent-viewer/) | Montre en direct, en organigramme, quel agent fait quoi : état en couleur, tâches et % réels, chat avec chaque agent, toutes tes sessions. Installable comme appli sur Windows et Mac, sans Internet. |
 | [turn-stats](turn-stats/) | Un bandeau au-dessus du prompt avec la durée, les outils et les tokens du dernier tour (et de ses sous-agents). |
 
 ## Installation

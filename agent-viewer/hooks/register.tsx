@@ -545,7 +545,7 @@ export const register: Register = on => {
         {url ? (
           <Text>
             <Text color="success">● </Text>
-            <Text dimColor>Vue complète (organigramme, chat) : </Text>
+            <Text dimColor>Vue complète (organigramme, chat, installable comme appli) : </Text>
             <Text weight="semibold">{url}</Text>
           </Text>
         ) : (

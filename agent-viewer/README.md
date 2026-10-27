@@ -41,6 +41,20 @@ principal, chaque sous-agent qu'il lance, ce qu'ils font, sur quelle partie du p
   page ouverte. Il faut `node` dans le PATH.
 - **Hors ligne** : la page ne charge rien depuis Internet.
 
+## L'appli « Agents » (Windows et Mac)
+
+La vue complète s'installe comme une appli, avec sa propre fenêtre et son icône :
+
+- **Windows ou Mac, avec Chrome ou Edge** : ouvre l'adresse donnée par le panneau (en principe
+  `http://127.0.0.1:47321/`), puis ⚙ Réglages → « Installer l'appli », ou l'icône d'installation dans la
+  barre d'adresse. L'appli apparaît dans le menu Démarrer (Windows) ou le Launchpad (Mac).
+- **Mac, avec Safari** : ouvre la même adresse, puis Fichier → « Ajouter au Dock ».
+
+L'appli a toujours besoin du mod : c'est une session Claude Code qui lance le hub. Si aucune session ne
+tourne, l'appli s'ouvre quand même et l'indique, puis se reconnecte toute seule. Elle est liée à son
+adresse : si le hub tourne exceptionnellement sur un autre port (deux versions du mod en même temps),
+ferme les anciennes sessions.
+
 ## Installation
 
 ```
@@ -90,6 +104,19 @@ subagent it launches, what each one is doing, on which part of the project, and 
   request coming from a foreign web page, and stops on its own after 15 minutes with no session and no open
   page. `node` must be on the PATH.
 - **Offline**: the page loads nothing from the Internet.
+
+### The "Agents" app (Windows and Mac)
+
+The full view installs as an app, with its own window and icon:
+
+- **Windows or Mac, with Chrome or Edge**: open the address shown in the pane (normally
+  `http://127.0.0.1:47321/`), then ⚙ Settings → "Install the app", or the install icon in the address
+  bar. The app shows up in the Start menu (Windows) or Launchpad (Mac).
+- **Mac, with Safari**: open the same address, then File → "Add to Dock".
+
+The app still needs the mod: a Claude Code session is what starts the hub. With no session running, the
+app opens anyway, says so, and reconnects on its own. It is tied to its address: if the hub ever runs on
+another port (two versions of the mod at once), close the old sessions.
 
 ### Install
 

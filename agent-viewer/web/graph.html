@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Agents</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#0c0d0c">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon-192.png">
 <style>
   :root { --bg:#0c0d0c; --stagebg:#111311; --panel:#151815; --card:#181b18; --line:#262b26; --line2:#3a413a;
     --soft:#1c241c; --text:#e2e5df; --muted:#878e86; --idle:#4f564f; --track:#232823; --userbg:#1c241c; --inbg:#0f110f;
@@ -153,6 +157,9 @@
       <div class="opts inline" data-opt="theme"><button data-val="sombre" data-i18n="dark"></button><button data-val="clair" data-i18n="light"></button></div>
       <h4 data-i18n="language"></h4>
       <div class="opts inline" data-opt="lang"><button data-val="fr">FR</button><button data-val="en">EN</button></div>
+      <h4 data-i18n="app"></h4>
+      <div class="opts"><button id="install" data-i18n="install" hidden></button></div>
+      <div class="sub" id="install-hint"></div>
     </div>
   </div>
 </div>
@@ -171,7 +178,10 @@ const T = {
     allSteps:'Toutes les étapes', unknownPart:'—', tDone:'Faite', tNow:'En cours', tTodo:'À faire', agentCol:'Agent', progressCol:'Avancement',
     placeholder:"Écrire à l'agent sélectionné…", noMsgs:'Pas encore de message avec cet agent.', mQueued:'En file', mSent:'Transmis', mFailed:'Refusé', mSending:'Envoi…',
     live:'En direct', reconnect:'Reconnexion…', noSession:'En attente des sessions Claude…\nLes sessions qui ont le mod agent-viewer apparaîtront ici.',
-    inactive:'inactive', emptyMsg:'Écris un message avant d’envoyer.', sendFail:"L'envoi a échoué : ", requestTitle:'Ta dernière demande', finalTitle:'Réponse de l’agent principal' },
+    inactive:'inactive', emptyMsg:'Écris un message avant d’envoyer.', sendFail:"L'envoi a échoué : ", requestTitle:'Ta dernière demande', finalTitle:'Réponse de l’agent principal',
+    noHub:"Le hub d'agent-viewer ne répond pas.\nOuvre une session Claude Code qui a le mod : l'appli se reconnectera toute seule.",
+    app:'Application', install:"Installer l'appli", installed:'Appli installée.',
+    installHint:"Pour l'installer : menu du navigateur → « Installer Agents » (Chrome, Edge), ou Fichier → « Ajouter au Dock » (Safari sur Mac)." },
   en: { zoomOut:'Zoom out', zoomIn:'Zoom in', fit:'Fit', fitTitle:'Show all agents', reset:'Reset layout', resetTitle:'Put the bubbles back in place',
     gripTitle:'Drag to resize the chat · double-click: original size', chatWith:'Chat', send:'Send', settings:'Settings', layout:'Layout',
     layoutA:'Org chart', layoutB:'Horizontal tree', layoutC:'Table', theme:'Theme', dark:'Dark', light:'Light', language:'Language',
@@ -183,7 +193,10 @@ const T = {
     allSteps:'All steps', unknownPart:'—', tDone:'Done', tNow:'Running', tTodo:'To do', agentCol:'Agent', progressCol:'Progress',
     placeholder:'Write to the selected agent…', noMsgs:'No messages with this agent yet.', mQueued:'Queued', mSent:'Relayed', mFailed:'Refused', mSending:'Sending…',
     live:'Live', reconnect:'Reconnecting…', noSession:'Waiting for Claude sessions…\nSessions with the agent-viewer mod will show up here.',
-    inactive:'inactive', emptyMsg:'Write a message first.', sendFail:'Sending failed: ', requestTitle:'Your last request', finalTitle:"Main agent's answer" },
+    inactive:'inactive', emptyMsg:'Write a message first.', sendFail:'Sending failed: ', requestTitle:'Your last request', finalTitle:"Main agent's answer",
+    noHub:"The agent-viewer hub is not responding.\nOpen a Claude Code session that has the mod: the app will reconnect on its own.",
+    app:'App', install:'Install the app', installed:'App installed.',
+    installHint:'To install it: browser menu → "Install Agents" (Chrome, Edge), or File → "Add to Dock" (Safari on Mac).' },
 }
 const store = { get(k, d){ try { const v = localStorage.getItem('av-'+k); return v == null ? d : JSON.parse(v) } catch { return d } },
   set(k, v){ try { localStorage.setItem('av-'+k, JSON.stringify(v)) } catch {} } }
@@ -196,6 +209,7 @@ function applyTexts(){
   document.querySelectorAll('[data-i18n-title]').forEach(el => { el.title = t(el.dataset.i18nTitle) })
   document.getElementById('input').placeholder = t('placeholder')
   document.getElementById('legend').innerHTML = ['done','run','wait','fail','alert'].map(k => `<span class="st-${k}"><i></i>${esc(t(k))}</span>`).join('')
+  syncInstall()
 }
 
 // ---------- État ----------
@@ -320,7 +334,7 @@ let lastSig = ''
 function render(force){
   const n = nodes()
   const empty = document.getElementById('empty')
-  empty.hidden = !!n; empty.textContent = n ? '' : t('noSession')
+  empty.hidden = !!n; empty.textContent = n ? '' : t(connected || payload.sessions.length ? 'noSession' : 'noHub')
   if (!n){ world.innerHTML = ''; lastSig = ''; renderProject(null); renderChat(); return }
   if (drag && drag.kind === 'card') return   // pas de redessin pendant qu'on déplace une bulle
   const [html, p] = LAYOUTS[layout](n); pairs = p
@@ -491,9 +505,22 @@ function connect(){
   const es = new EventSource('/events')
   es.onopen = () => { connected = true; setConn() }
   es.onmessage = ev => { try { payload = JSON.parse(ev.data) } catch { return } if (!Array.isArray(payload.sessions)) payload.sessions = []; renderSessions(); render() }
-  es.onerror = () => { connected = false; setConn() }
+  es.onerror = () => { connected = false; setConn(); render() }
 }
 window.addEventListener('resize', drawLinks)
+// ---------- Appli installable ----------
+let installEvt = null
+const installBtn = document.getElementById('install'), installHint = document.getElementById('install-hint')
+function syncInstall(){
+  const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true
+  installBtn.hidden = !installEvt || standalone
+  installHint.textContent = standalone ? t('installed') : installEvt ? '' : t('installHint')
+}
+addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; syncInstall() })
+addEventListener('appinstalled', () => { installEvt = null; syncInstall() })
+installBtn.onclick = async () => { if (!installEvt) return; installEvt.prompt(); try { await installEvt.userChoice } catch {} installEvt = null; syncInstall() }
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {})
+
 applyTexts(); syncMenu(); setConn(); render(true); connect()
 </script>
 </body>
