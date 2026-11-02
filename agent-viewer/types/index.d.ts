@@ -55,6 +55,10 @@ export type AgentRow = {
   /** Raison d'une alerte pour l'utilisateur (question posée, autorisation demandée) ; absente sinon */
   alert?: string
   alertToolId?: string
+  /** 'codex' : une délégation à ChatGPT (`codex exec`), montrée comme une bulle enfant de l'agent qui l'a lancée */
+  engine?: 'codex'
+  /** Ce que la sortie de Codex a dit : modèle, tokens consommés, lancé en arrière-plan */
+  codex?: { model?: string; tokens?: number; background?: boolean }
 }
 
 /** Un appel d'outil fait par un agent : un nœud feuille du graphe */

@@ -101,6 +101,12 @@
   .projrow .bar .t { height:13px; -webkit-mask:repeating-linear-gradient(90deg,#000 0 12px,transparent 12px 15px); mask:repeating-linear-gradient(90deg,#000 0 12px,transparent 12px 15px); }
   .projrow .bar .p { font-size:13px; color:var(--text); }
   .dots { display:flex; gap:4px; } .dots i { width:9px; height:13px; border-radius:1px; display:block; }
+  .ico.gpt { font:700 9.5px var(--f-num); letter-spacing:.02em; }
+  .usage { margin-top:10px; font:12px var(--f-num); color:var(--muted); }
+  .usage b { color:var(--text); font-weight:600; }
+  .gpt-total { font:12px var(--f-num); color:var(--muted); white-space:nowrap; }
+  .gpt-total b { color:var(--text); font-weight:600; }
+  .kv { display:grid; grid-template-columns:auto 1fr; gap:3px 10px; font-size:12px; } .kv span:nth-child(odd) { color:var(--muted); }
   .chathead { display:flex; align-items:center; gap:14px; }
   .msgs { display:flex; flex-direction:column; gap:6px; max-height:110px; overflow:auto; }
   .msgs .none { color:var(--muted); font-size:12px; }
@@ -179,6 +185,8 @@ const T = {
     placeholder:"Écrire à l'agent sélectionné…", noMsgs:'Pas encore de message avec cet agent.', mQueued:'En file', mSent:'Transmis', mFailed:'Refusé', mSending:'Envoi…',
     live:'En direct', reconnect:'Reconnexion…', noSession:'En attente des sessions Claude…\nLes sessions qui ont le mod agent-viewer apparaîtront ici.',
     inactive:'inactive', emptyMsg:'Écris un message avant d’envoyer.', sendFail:"L'envoi a échoué : ", requestTitle:'Ta dernière demande', finalTitle:'Réponse de l’agent principal',
+    gptModel:'Modèle', gptTokens:'Tokens', gptDuration:'Durée', gptBg:"Lancé en arrière-plan : la fin et les tokens ne sont pas suivis.", gptAsk:'Consigne donnée à ChatGPT',
+    gptCalls:'appel', gptCallsN:'appels', tokensWord:'tokens', unknown:'inconnu',
     noHub:"Le hub d'agent-viewer ne répond pas.\nOuvre une session Claude Code qui a le mod : l'appli se reconnectera toute seule.",
     app:'Application', install:"Installer l'appli", installed:'Appli installée.',
     installHint:"Pour l'installer : menu du navigateur → « Installer Agents » (Chrome, Edge), ou Fichier → « Ajouter au Dock » (Safari sur Mac)." },
@@ -194,6 +202,8 @@ const T = {
     placeholder:'Write to the selected agent…', noMsgs:'No messages with this agent yet.', mQueued:'Queued', mSent:'Relayed', mFailed:'Refused', mSending:'Sending…',
     live:'Live', reconnect:'Reconnecting…', noSession:'Waiting for Claude sessions…\nSessions with the agent-viewer mod will show up here.',
     inactive:'inactive', emptyMsg:'Write a message first.', sendFail:'Sending failed: ', requestTitle:'Your last request', finalTitle:"Main agent's answer",
+    gptModel:'Model', gptTokens:'Tokens', gptDuration:'Duration', gptBg:'Started in the background: its end and tokens are not tracked.', gptAsk:'Prompt sent to ChatGPT',
+    gptCalls:'call', gptCallsN:'calls', tokensWord:'tokens', unknown:'unknown',
     noHub:"The agent-viewer hub is not responding.\nOpen a Claude Code session that has the mod: the app will reconnect on its own.",
     app:'App', install:'Install the app', installed:'App installed.',
     installHint:'To install it: browser menu → "Install Agents" (Chrome, Edge), or File → "Add to Dock" (Safari on Mac).' },
@@ -257,7 +267,12 @@ function nodes(){
   const s = session(); if (!s) return null
   const agents = s.agents || []
   const main = agents.find(a => a.id === MAIN) || { id:MAIN, type:'principal', description:t('mainAgent'), state:'done', startedAt:Date.now(), toolCount:0, recentTools:[] }
-  const subs = agents.filter(a => a.id !== MAIN)
+  const all = agents.filter(a => a.id !== MAIN)
+  const keep = new Set()
+  const byParent = {}
+  for (const a of all) if (a.engine === 'codex') (byParent[a.parentId || MAIN] ||= []).push(a)
+  for (const list of Object.values(byParent)) list.slice(-3).forEach(a => keep.add(a.id))
+  const subs = all.filter(a => a.engine !== 'codex' || keep.has(a.id))
   const fin = s.final || null
   const finState = !fin ? 'wait' : fin.state === 'waiting' ? 'wait' : fin.state === 'ready' ? 'done' : 'fail'
   return {
@@ -272,7 +287,24 @@ const stage = document.getElementById('stage'), world = document.getElementById(
 const bar = (p, cls) => `<div class="bar ${cls||''}"><div class="t"><div class="f ${p==null?'ind':''}" style="width:${p??0}%"></div></div><span class="p">${p==null?'—':p+' %'}</span></div>`
 const phase = () => `--phase:-${((Date.now() % 2230) / 1000).toFixed(2)}s`
 
+const fmtTokens = n => n == null ? null : n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + ' k' : String(n)
+const fmtDur = ms => { const s = Math.max(0, Math.round(ms / 1000)); return s < 60 ? s + ' s' : Math.floor(s / 60) + ' min ' + String(s % 60).padStart(2, '0') }
+function gptUsage(a){
+  const c = a.codex || {}, end = a.endedAt || (stateOf(a) === 'run' ? Date.now() : null)
+  return [c.model, end ? fmtDur(end - a.startedAt) : null, c.tokens != null ? fmtTokens(c.tokens) + ' ' + t('tokensWord') : null].filter(Boolean)
+}
+function gptDetail(a){
+  const c = a.codex || {}, end = a.endedAt || (stateOf(a) === 'run' ? Date.now() : null)
+  return `<div class="detail">
+    <h4>${esc(t('gptAsk'))}</h4><div class="box">${esc(a.prompt || a.description)}</div>
+    <h4>${esc(t('part'))}</h4><div class="box">${esc(a.part || t('unknownPart'))}</div>
+    <h4>ChatGPT</h4><div class="kv"><span>${esc(t('gptModel'))}</span><span>${esc(c.model || t('unknown'))}</span>
+      <span>${esc(t('gptDuration'))}</span><span>${esc(end ? fmtDur(end - a.startedAt) : t('unknown'))}</span>
+      <span>${esc(t('gptTokens'))}</span><span>${esc(c.tokens != null ? c.tokens.toLocaleString(lang) : t('unknown'))}</span></div>
+    ${c.background ? `<div class="sub" style="margin-top:6px">${esc(t('gptBg'))}</div>` : ''}</div>`
+}
 function agentDetail(a, isMain){
+  if (a.engine === 'codex') return gptDetail(a)
   const pr = progress(a)
   const s = session()
   const does = isMain ? (s.request ? s.request.text : t('mainSub')) : (a.prompt || a.description)
@@ -295,9 +327,9 @@ function agentCard(a, isMain, compact){
   return `<div class="card ${cls} ${st==='run'||st==='alert'?'run':''} ${open?'sel open':''} ${popId===a.id?'pop':''}" data-id="${esc(a.id)}"
     style="${compact?'padding:10px 12px;':''}${o?`transform:translate(${o[0]}px,${o[1]}px);`:''}${phase()}">
     <span class="badge">${esc(t(st))}</span>
-    <div class="head"><div class="ico">${isMain ? ICONS.main : kindIcon(a)}</div><div><div class="ttl">${esc(isMain ? t('mainAgent') : a.description)}</div><div class="sub">${esc(sub)}</div></div></div>
-    ${now ? `<div class="now">→ ${esc(now)}</div>` : ''}
-    ${bar(pr.p)}${open ? agentDetail(a, isMain) : ''}</div>`
+    <div class="head"><div class="ico ${a.engine==='codex'?'gpt':''}">${isMain ? ICONS.main : a.engine === 'codex' ? 'GPT' : kindIcon(a)}</div><div><div class="ttl">${esc(isMain ? t('mainAgent') : a.description)}</div><div class="sub">${esc(sub)}</div></div></div>
+    ${now && a.engine !== 'codex' ? `<div class="now">→ ${esc(now)}</div>` : ''}
+    ${a.engine === 'codex' ? `<div class="usage">${gptUsage(a).map(x => esc(x)).join(' · ') || '—'}</div>` : bar(pr.p)}${open ? agentDetail(a, isMain) : ''}</div>`
 }
 function boxCard(n, compact){
   const cls = n.kind === 'fin' ? CLS[n.st] : ''
@@ -420,11 +452,18 @@ function renderProject(n){
   const p = steps.length ? Math.round(done / steps.length * 100) : null
   const col = s => s === 'completed' ? 'var(--s-done)' : s === 'in_progress' ? 'var(--s-run)' : 'var(--idle)'
   el.title = steps.map(x => `${x.content} · ${t(x.status==='completed'?'tDone':x.status==='in_progress'?'tNow':'tTodo')}`).join('\n')
+  const gpt = n ? (n.s.agents || []).filter(a => a.engine === 'codex') : []
+  const gptTok = gpt.reduce((sum, a) => sum + ((a.codex && a.codex.tokens) || 0), 0)
   el.innerHTML = `<span class="lbl">${esc(t('project'))}</span>${bar(p)}<span class="dots">${steps.map(x => `<i title="${esc(x.content)}" style="background:${col(x.status)}"></i>`).join('')}</span>`
+    + (gpt.length ? `<span class="gpt-total">ChatGPT · <b>${gpt.length}</b> ${esc(t(gpt.length > 1 ? 'gptCallsN' : 'gptCalls'))} · <b>${esc(fmtTokens(gptTok))}</b> ${esc(t('tokensWord'))}</span>` : '')
 }
 
 // ---------- Chat ----------
-function target(){ const n = nodes(); if (!n) return null; const id = sel && (sel === MAIN || n.subs.some(a => a.id === sel)) ? sel : MAIN
+function target(){ const n = nodes(); if (!n) return null
+  // Une bulle ChatGPT n'est pas un agent Claude : le chat va à l'agent qui l'a lancée
+  const picked = n.subs.find(a => a.id === sel)
+  const want = picked && picked.engine === 'codex' ? (picked.parentId || MAIN) : sel
+  const id = want && (want === MAIN || n.subs.some(a => a.id === want && a.engine !== 'codex')) ? want : MAIN
   return { id, name: id === MAIN ? t('mainAgent') : n.subs.find(a => a.id === id).description } }
 let lastChatSig = ''
 function renderChat(){

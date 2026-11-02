@@ -18,6 +18,8 @@ principal, chaque sous-agent qu'il lance, ce qu'ils font, sur quelle partie du p
   inventé. La barre du projet suit le plan de l'agent principal.
 - **Un chat** en bas : écris à l'agent sélectionné, sa réponse s'affiche dans son fil.
 - **Toutes tes sessions** Claude Code qui ont le mod, avec un sélecteur en haut à gauche.
+- **Les délégations à ChatGPT** : quand un agent lance `codex exec`, une bulle « ChatGPT · Codex » apparaît sous lui
+  (consigne, modèle, durée, tokens lus dans la sortie de Codex), et la barre du chat donne le total de la session.
 - Molette pour zoomer, glisser le fond pour se déplacer, glisser une bulle pour la déplacer (sa place est
   retenue ; « Remettre en place » rend la disposition d'origine), poignée en haut du chat pour l'agrandir.
 - **Réglages ⚙** à côté du chat : disposition (organigramme, arbre horizontal, tableau), thème sombre ou
@@ -84,6 +86,8 @@ subagent it launches, what each one is doing, on which part of the project, and 
   agent's plan.
 - **A chat** at the bottom: write to the selected agent; its answer shows up in its thread.
 - **All your Claude Code sessions** that have the mod, with a picker at the top left.
+- **Delegations to ChatGPT**: when an agent runs `codex exec`, a "ChatGPT · Codex" bubble appears under it
+  (prompt, model, duration, tokens read from Codex's output), and the chat bar shows the session total.
 - Mouse wheel to zoom, drag the background to pan, drag a bubble to move it (its position is remembered;
   "Reset layout" restores the default), drag the handle above the chat to make it taller.
 - **Settings ⚙** next to the chat: layout (org chart, horizontal tree, table), dark or light theme, French

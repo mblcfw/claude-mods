@@ -77,6 +77,18 @@ const ARG_KEYS = ['description', 'command', 'file_path', 'pattern', 'query', 'ur
 
 const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text)
 
+// Le texte d'un résultat d'outil (Bash : { stdout, stderr, … })
+const textOf = (v: unknown): string =>
+  typeof v === 'string' ? v : v && typeof v === 'object' ? Object.values(v).filter(x => typeof x === 'string').join('\n') : ''
+
+// La consigne donnée à Codex : la plus longue chaîne entre guillemets après « exec »
+function codexPrompt(command: string) {
+  const rest = command.slice(command.search(/\bexec\b/i) + 4)
+  const quoted = [...rest.matchAll(/"((?:[^"\\]|\\.)*)"|'([^']*)'/g)].map(m => m[1] ?? m[2] ?? '')
+  const best = quoted.sort((a, b) => b.length - a.length)[0] ?? ''
+  return best.replace(/\\"/g, '"').replace(/\s+/g, ' ').trim()
+}
+
 const describe = (e: { tool: string }) => {
   const args = e as unknown as Record<string, unknown>
   const key = ARG_KEYS.find(k => typeof args[k] === 'string' && (args[k] as string).trim() !== '')
@@ -439,10 +451,47 @@ export const register: Register = on => {
     const args = e as unknown as Record<string, unknown>
     await trackTasks($, id, e.tool, args)
 
+    // Délégation à ChatGPT : une commande `codex exec` devient une bulle « ChatGPT · Codex » sous cet agent
+    const command = /^(Bash|PowerShell)$/.test(e.tool) && typeof args.command === 'string' ? args.command : ''
+    const isCodex = /\bcodex(?:\.cmd|\.exe)?\s+exec\b/i.test(command)
+    const codexId = `codex:${e.tool_use_id}`
+    if (isCodex) {
+      const mainTasks = (await read($, agents)).find(row => row.id === MAIN)?.tasks ?? []
+      const step = mainTasks.findIndex(t => t.status === 'in_progress')
+      const row: AgentRow = {
+        id: codexId,
+        type: 'ChatGPT · Codex',
+        description: clip(codexPrompt(command) || 'Tâche déléguée à Codex', 60),
+        prompt: clip(codexPrompt(command) || command, 400),
+        parentId: id,
+        isBackground: args.run_in_background === true,
+        state: 'running',
+        startedAt,
+        toolCount: 0,
+        recentTools: [],
+        part: step >= 0 ? `Étape ${step + 1} · ${mainTasks[step]!.content}` : undefined,
+        engine: 'codex',
+        codex: { background: args.run_in_background === true },
+      }
+      await update($, agents, list => [...list.filter(one => one.id !== codexId), row].slice(-60))
+    }
+
     let isError = false
     try {
       const ran = await next(e)
       isError = !!(ran.deny || ran.isError)
+      if (isCodex) {
+        const out = textOf(ran.result) + '\n' + (ran.text ?? '') + '\n' + (ran.deny ?? '')
+        const model = /^model:\s*(\S+)/m.exec(out)?.[1]
+        const tokens = /tokens used\s*[\r\n]+\s*([\d\s  .,]+)/i.exec(out)?.[1]?.replace(/\D/g, '')
+        const now = await $.clock.now()
+        await patch($, codexId, row => ({
+          ...row,
+          state: isError ? 'failed' : 'done',
+          endedAt: row.codex?.background ? undefined : now,
+          codex: { ...row.codex, model, tokens: tokens ? Number(tokens) : undefined },
+        }))
+      }
       // TaskCreate : l'identifiant de la tâche n'existe qu'après l'appel
       if (e.tool === 'TaskCreate' && !isError) {
         const created = (ran.result as { task?: { id?: string; subject?: string } } | undefined)?.task
